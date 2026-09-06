@@ -1,0 +1,25 @@
+# Single-node accelerate launcher config for bodhan_genai.mt training.
+#
+# DDP, not FSDP: at LoRA rank 32 only the adapter is trainable, so the optimizer
+# state is small enough that sharding buys nothing and costs communication. (TTS
+# uses FSDP2 because it trains all 3B parameters — the two are not comparable.)
+#
+# num_processes is overridden at launch by scripts/mt/train_lora.sh, which reads
+# the visible GPU count.
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: MULTI_GPU
+downcast_bf16: 'no'
+enable_cpu_affinity: true
+gpu_ids: all
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false

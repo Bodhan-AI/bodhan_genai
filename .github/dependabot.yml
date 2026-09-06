@@ -1,0 +1,34 @@
+version: 2
+
+# Dependabot version updates work on private repositories without GitHub
+# Advanced Security, which is why dependency hygiene lives here rather than in a
+# code-scanning job.
+updates:
+  # Pinned action SHAs/tags go stale silently; this is the only thing watching them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+
+  # The CI requirement files are the ones a bot can safely bump: they are plain
+  # pinned lists, and CI proves the bump before it merges.
+  #
+  # constraints.txt is deliberately NOT listed. It is the measured, blessed runtime
+  # lock — the MT pins are tied to published IN22 scores — so an automated bump
+  # there is a silent quality regression rather than a chore.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+    allow:
+      - dependency-name: "*"
+    ignore:
+      # Framework majors move the whole stack; those are human decisions.
+      - dependency-name: torch
+      - dependency-name: transformers
+      - dependency-name: vllm

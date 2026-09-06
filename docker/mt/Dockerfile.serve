@@ -1,0 +1,104 @@
+# syntax=docker/dockerfile:1
+# MT serving image: stock `vllm serve` behind scripts/mt/serve.sh, exposing vLLM's
+# OpenAI-compatible /v1. Nothing from this repo sits in the request path — the
+# prompt contract lives client-side in MTClient (docs/mt/serving.md), so there is
+# no Ray, no websockets and no codec in here; the TTS image's shape does not apply.
+#
+# Mirrors install.sh's `mt:gpu` branch, which is a DIFFERENT stack from the TTS
+# image: standalone CPython pinned by .python-version, vLLM first from its per-CUDA
+# wheel index (it pulls its own matched torch), then the package under constraints.txt.
+# flash-attn is absent on purpose — MT runs on sdpa, and vLLM ships its own kernels.
+#
+# Build (repo root):  docker build -f docker/mt/Dockerfile.serve -t bodhan-mt-serve .
+# Run:                scripts/mt/serve_docker.sh  (see docs/mt/serving.md)
+
+# 12.9 to match the cu129 wheels below (install.sh's CUDA_TAG default; it is
+# forward-compatible with this cluster's 12.2 driver). The documented escape hatch
+# for another driver line, CUDA_TAG=cu126, means editing this tag and all three
+# index URLs together — they are one decision, not four.
+FROM nvidia/cuda:12.9.1-base-ubuntu24.04
+
+# ca-certificates: all three wheel indexes and the Hub are https.
+# iproute2: serve.sh probes for a free port with `ss`. Without it the probe answers
+# "free" for everything, and a squatted port then fails at bind — after the 15.9 GB
+# load. Only reachable under --network host; a fresh container netns squats nothing.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates iproute2 \
+ && rm -rf /var/lib/apt/lists/*
+
+# uv 0.11+: 0.6 cannot fetch the CPython the .python-version pins, so the venv step fails.
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+
+WORKDIR /app
+ENV UV_PYTHON_INSTALL_DIR=/opt/python \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# --- dependency layers (cached until the pins change) -----------------------
+COPY .python-version constraints.txt pyproject.toml README.md LICENSE NOTICE ./
+
+RUN uv venv /opt/venv --python "$(cat .python-version)"
+
+# Required order (see install.sh): vLLM FIRST from its per-CUDA index, letting it
+# pull its own matched torch — pre-pinning torch leaves a half-installed torch behind
+# on 0.26. torch is not version-pinned by constraints.txt and cannot be: these wheels
+# publish a local version (`+cu129`) that an `==` constraint will not match.
+#
+# Never PyPI: the PyPI default wheel is a CUDA 13 build that imports fine and then
+# reports no GPU on this cluster's driver — a failure that surfaces as "no GPUs
+# available", not as an install error. No --constraint on this step, matching
+# install.sh; --no-deps would mean hand-maintaining vLLM's ~50 dependencies.
+#
+# --index-strategy unsafe-best-match because uv defaults to first-index — a
+# dependency-confusion guard that considers only the FIRST index carrying a package,
+# and this stack legitimately spans three. Two concrete breakages without it:
+# `packaging` resolves to the old copy on the PyTorch index, so flashinfer-python
+# (needs >=24.2) becomes unsatisfiable; and `vllm==0.26.0` refuses to match the
+# published `0.26.0+cu129`. pip does best-match across indexes by default, which is
+# why the reference environment never hit either.
+RUN uv pip install "vllm==0.26.0" \
+      --extra-index-url https://wheels.vllm.ai/0.26.0/cu129 \
+      --extra-index-url https://download.pytorch.org/whl/cu129 \
+      --index-strategy unsafe-best-match
+
+# torchvision is a vllm dependency we never import, matched to the torch above.
+RUN uv pip install torchvision \
+      --index-url https://download.pytorch.org/whl/cu129
+
+# --- package layer (rebuilds on src changes; deps above stay cached) --------
+COPY src/ src/
+COPY scripts/mt/serve.sh scripts/mt/serve.sh
+RUN uv pip install ".[mt-serve]" \
+      --constraint constraints.txt \
+      --extra-index-url https://download.pytorch.org/whl/cu129 \
+      --index-strategy unsafe-best-match
+
+# --- runtime -----------------------------------------------------------------
+# Weights (15.9 GB) are NOT baked in: mount them under /models (see serve_docker.sh)
+# or let serve.sh pull its default hub id. That default,
+# bodhan-ai/indic-translate, is a PRIVATE repo, and the `hf auth login`
+# half of serve.sh's credentials advice is useless in a container — HF_TOKEN is the
+# only route in, and without it the pull 401s minutes after a healthy-looking start.
+# HF_HOME points into /models so a hub download can be mounted through and survive
+# `docker run --rm`, instead of being paid again per container.
+# PYTHONUNBUFFERED because the foreground log below is the only progress signal.
+ENV PYTHONUNBUFFERED=1 \
+    HF_HOME=/models/hf-cache
+
+EXPOSE 8000
+
+# serve.sh is the single source of truth for launch env + arg plumbing. Reads
+# CHECKPOINT, SERVED_NAME, GPU, PORT, MAX_MODEL_LEN, GPU_MEMORY_UTILIZATION and
+# TENSOR_PARALLEL_SIZE from env; extra `docker run ... <flags>` are appended to
+# `vllm serve`. GPU is not how you pick a device here — `docker run --gpus` is;
+# GPU becomes CUDA_VISIBLE_DEVICES over the CONTAINER-local numbering (always
+# 0..N-1), which is why serve_docker.sh rewrites it for tensor-parallel runs.
+#
+# --foreground is load-bearing, not a preference: by default serve.sh backgrounds
+# vLLM and exits 0 the moment the server answers, which would stop the container
+# exactly when it became useful. In foreground mode serve.sh `exec`s vLLM, so the
+# engine is PID 1 and `docker stop` signals it directly rather than a wrapper that
+# would orphan it. The trade: that path writes no vllm-serve.info and prints no
+# "Ready" banner, so readiness is observed from outside — GET /v1/models, which
+# must name SERVED_NAME to count.
+ENTRYPOINT ["bash", "scripts/mt/serve.sh", "--foreground"]

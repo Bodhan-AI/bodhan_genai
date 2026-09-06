@@ -1,0 +1,33 @@
+# Offline batch MT inference (bodhan_genai.mt.inference.offline_vllm).
+#
+# Loaded via `--config configs/mt/infer/offline_vllm.yaml`; nested sections are
+# flattened onto the argparse dests, and explicit CLI flags always override these
+# values. Unknown keys fail loudly, so this file and the CLI cannot drift.
+#
+# Still required on the CLI: --tgt-lang, and one of --text / --input-file / stdin.
+
+model: "bodhan-ai/indic-translate"
+# e.g. model: /path/to/local/checkpoint      # a local dir or a merged finetune
+
+engine:
+  dtype: bfloat16
+  tensor_parallel_size: 1
+  # The architecture allows 131072, but only 32768 is validated end to end.
+  # Lower it to 8192 for sentence workloads and the KV cache gets much cheaper.
+  max_model_len: 32768
+  gpu_memory_utilization: 0.90
+  # Skips CUDA-graph capture. This is the configuration the published scores were
+  # measured with, and capture buys little at translation lengths.
+  enforce_eager: true
+
+sampling:
+  # Greedy. The recommended setting for translation and the only one that is
+  # reproducible run to run — raise temperature only if you want variety and are
+  # prepared for the scores to move.
+  temperature: 0.0
+  top_p: 1.0
+  repetition_penalty: 1.0
+  # 512 suits sentences; ~2048 a paragraph, ~8192 a full document.
+  # Indic targets need roughly 1.5-2x the English source token count.
+  max_new_tokens: 512
+  seed: 0            # only used when temperature > 0

@@ -1,0 +1,55 @@
+# Stage 1 — Dataset Tokenization Config
+#
+# SNAC-encodes audio from JSONL manifests or HuggingFace Hub datasets into
+# sharded Parquet. Output schema per row:
+#   text, token_ids (list<int32>), language, speaker, style, accent,
+#   audio_caption, audio_filepath
+#
+# The tokenizer at models.tokenizer_path MUST already contain the SNAC audio
+# tokens (<|snac_0|> ... — the extended frozen-layout tokenizer). This repo
+# does not build tokenizers; tokenization fails loudly if <|snac_0|> is absent.
+#
+# Usage:
+#   python -m bodhan_genai.tts.data.tokenize --config configs/tts/data/tokenize.yaml
+
+ray:
+  address: null                   # null = local Ray; "auto" = existing cluster
+
+models:
+  snac_model_path: "hubertsiuzdak/snac_24khz"
+  # snac_model_path: "/path/to/checkpoints/snac/snac_24khz"
+  tokenizer_path: "/path/to/extended-tokenizer"
+  # tokenizer_path: "/path/to/checkpoints/llama-3-audio-tok_trimmed"
+
+processing:
+  workers_per_gpu: 2        # Ray actors per GPU (tune down if OOM)
+  encode_batch_size: 32     # SNAC batch size per actor
+
+datasets:
+
+  # JSONL manifest source: each line has an audio filepath + transcript.
+  - source:
+      jsonl: "/path/to/manifest_train.jsonl"
+    columns:
+      audio: "audio_filepath"
+      text: "text"
+      language: "language"
+      speaker: "speaker"
+      # optional: style, accent, audio_caption
+    output:
+      dir: "/path/to/tokenized/train/my_dataset"
+      rows_per_shard: 10000
+
+  # HuggingFace Hub dataset example:
+  # - source:
+  #     hf_dataset: "mozilla-foundation/common_voice_17_0"
+  #     subset: "en"
+  #     split: "train"
+  #     trust_remote_code: false
+  #   columns:
+  #     audio: "audio"        # HF Audio feature column
+  #     text: "sentence"
+  #     speaker: "client_id"
+  #   output:
+  #     dir: "/path/to/tokenized/common_voice_en_train"
+  #     rows_per_shard: 10000

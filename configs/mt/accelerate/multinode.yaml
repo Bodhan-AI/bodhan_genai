@@ -1,0 +1,30 @@
+# Multi-node accelerate launcher config for bodhan_genai.mt training.
+#
+# Differs from single_node.yaml only in the rendezvous: `c10d` negotiates ranks
+# at startup, so machine_rank does not have to be baked in per node. The head
+# node's address is passed at launch (`--main_process_ip`), not written here —
+# it changes every allocation.
+#
+#   head=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+#   srun accelerate launch \
+#     --config_file configs/mt/accelerate/multinode.yaml \
+#     --num_machines "$SLURM_NNODES" \
+#     --num_processes $((SLURM_NNODES * 8)) \
+#     --main_process_ip "$head" --main_process_port 29500 \
+#     -m bodhan_genai.mt.training.train configs/mt/train/lora.yaml
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: MULTI_GPU
+downcast_bf16: 'no'
+enable_cpu_affinity: true
+gpu_ids: all
+main_training_function: main
+mixed_precision: bf16
+# num_machines / num_processes / main_process_ip come from the launch command.
+main_process_port: 29500
+rdzv_backend: c10d
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false

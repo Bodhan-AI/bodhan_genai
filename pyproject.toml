@@ -1,0 +1,319 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bodhan-genai"
+version = "0.1.0"
+description = "Bodhan GenAI model tooling — TTS (Llama-3.2-3B + SNAC), MT (Gemma-4-E4B Indic translation) and OCR (IndicOCR): data pipelines, training, inference and serving."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Bodhan GenAI Team" }]
+keywords = [
+  "tts", "text-to-speech", "snac", "llama", "orpheus", "speech",
+  "machine-translation", "indic", "gemma", "vllm",
+  "ocr", "document-parsing", "layout-analysis", "reading-order", "qwen",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# constraints.txt is the authoritative full lock; upgrades are deliberate pin edits.
+# Core stays light and CPU-installable: the codec/template/prompt modules and the
+# unit-test suite work without GPU extras; each pipeline stage needs its extra
+# ([tts-data]/[tts-train]/[tts-infer]/[tts-serve], [mt-data]/[mt-train]/..., [ocr-infer])
+# for its python -m entry point. Extras stay modality-scoped so a lean install (an
+# MT-only serving image, say) does not drag in Ray Serve and SNAC — and so the
+# siblings this repo will grow (.asr) get their own without colliding.
+#
+# ONE ENVIRONMENT, ALL MODALITIES. They previously could not co-install: TTS was
+# pinned to transformers 5.5.3 / vllm 0.19.0, below the Gemma 4 floor MT needs, and
+# OCR's recognizer needs vllm >= 0.26. Verified that the TTS pins were a snapshot
+# rather than a constraint — the TTS code only touches long-stable APIs and already
+# carried a version-tolerant AsyncLLM import. The last real conflict was tts-serve's
+# exact fastapi==0.141.1 against vLLM 0.26's fastapi[standard]>=0.133,<0.137;
+# relaxing it to that range resolves all three modalities onto transformers 5.13.1 /
+# vllm 0.26 / torch 2.11.0 and one venv. All three suites pass against that set.
+#
+# Core deps carry FLOORS, not exact pins; exact versions live in constraints.txt,
+# which every documented install path applies.
+dependencies = [
+  "numpy>=2.3",
+  "pyyaml>=6.0",
+  "pydantic>=2.13",
+  "tqdm>=4.67",
+  "sortedcontainers>=2.4",
+]
+
+[project.optional-dependencies]
+# --------------------------------------------------------------------------- #
+# TTS (bodhan_genai.tts) — Llama-3.2-3B + SNAC.
+# --------------------------------------------------------------------------- #
+# Stage 1/2 data pipeline (GPU SNAC encoding + parquet compilation).
+tts-data = [
+  "ray==2.57.0",
+  "datasets==5.0.1",
+  "pandas==3.0.5",
+  "pyarrow==25.0.1",
+  "librosa==0.11.0",
+  "soundfile==0.14.0",
+  "torch>=2.11",           # exact build pinned by install.sh (cu129 index)
+  "torchaudio>=2.11",
+  "snac==1.2.1",
+  "transformers==5.13.1",
+  "tokenizers==0.22.2",
+]
+# Training. flash-attn is intentionally absent: it ships no wheel for this
+# torch/CUDA line, so install.sh builds it separately and unpinned.
+tts-train = [
+  "torch>=2.11",
+  "transformers==5.13.1",
+  "accelerate==1.14.0",
+  "datasets==5.0.1",
+  "tokenizers==0.22.2",
+  "peft==0.20.0",
+  "safetensors==0.8.0",
+  "sentencepiece==0.2.2",
+  "einops==0.8.2",
+  "wandb==0.28.0",
+  "pandas==3.0.5",
+  "pyarrow==25.0.1",
+]
+# Offline batch inference.
+tts-infer = [
+  "vllm>=0.20",            # exact build pinned by install.sh (per-CUDA index)
+  "ray==2.57.0",
+  "torch>=2.11",
+  "torchaudio>=2.11",
+  "transformers==5.13.1",
+  "snac==1.2.1",
+  "soundfile==0.14.0",
+  "pyloudnorm==0.2.0",   # chunked-synthesis LUFS recipe (RMS fallback without it)
+]
+# Streaming serving stack (Ray Serve + vLLM AsyncLLM + in-process SNAC).
+tts-serve = [
+  "vllm>=0.20",
+  "ray[serve]==2.57.0",
+  # Range, not a pin: vLLM 0.26 requires fastapi[standard]>=0.133,<0.137, and an
+  # exact 0.141.1 here was the one thing keeping OCR out of the shared environment.
+  # constraints.txt carries the exact version the documented install resolves to.
+  "fastapi>=0.133,<0.137",
+  "uvicorn==0.52.1",
+  "websockets==17.0.1",
+  "snac==1.2.1",
+  "torch>=2.11",
+  "soundfile==0.14.0",
+  "huggingface_hub==1.27.0",
+  "pyloudnorm==0.2.0",
+]
+
+# --------------------------------------------------------------------------- #
+# MT (bodhan_genai.mt) — IndicTranslate, Gemma-4-E4B for Indic translation.
+#
+# The Gemma 4 architecture needs transformers >= 5.12 and vllm >= 0.20; every
+# modality now sits on 5.13.1 / 0.26.0, so these install alongside tts-* and ocr-*.
+#
+# Pure-python deps are pinned to a measured, working combination; upgrades are
+# deliberate pin edits, and need the IN22 scores re-measured.
+#
+# torch/vllm carry FLOORS here, not pins: their CUDA wheels publish a local version
+# (e.g. `0.26.0+cu129`) that an `==0.26.0` requirement cannot match, and hardcoding
+# the local segment would break a CUDA_TAG override. install.sh installs both
+# explicitly at their exact versions from the per-CUDA indexes, before this.
+# --------------------------------------------------------------------------- #
+mt-data = [
+  "datasets==5.0.1",
+  "transformers==5.13.1",
+  "tokenizers==0.22.2",
+  "filelock>=3.13",
+]
+# Finetuning. PROVISIONAL — the trainer may be replaced (see docs/mt/training.md);
+# `trl` is confined to this extra so that swap does not touch the others.
+mt-train = [
+  "torch>=2.11",
+  "transformers==5.13.1",
+  "trl==1.6.0",
+  "peft==0.20.0",
+  "accelerate==1.14.0",
+  "datasets==5.0.1",
+  "safetensors==0.8.0",
+  "sentencepiece==0.2.2",
+  "filelock>=3.13",
+  "wandb==0.28.0",
+]
+# Offline batch inference + the HF reference path.
+mt-infer = [
+  "vllm>=0.20",
+  "torch>=2.11",
+  "transformers==5.13.1",
+  "accelerate==1.14.0",
+  "safetensors==0.8.0",
+]
+# Serving is stock `vllm serve` (scripts/mt/serve.sh) plus a typed client.
+mt-serve = [
+  "vllm>=0.20",
+  "transformers==5.13.1",
+  "openai>=2.0.0",
+  "huggingface_hub>=1.0.0",
+]
+# IN22 score replication.
+mt-eval = [
+  "datasets==5.0.1",
+  "sacrebleu==2.6.0",
+  "openai>=2.0.0",
+]
+
+# --------------------------------------------------------------------------- #
+# OCR (bodhan_genai.ocr) — IndicOCR: IndicDocLayout + IndicBlockOCR.
+#
+# Shares the one environment with TTS and MT. The recognizer's vllm >= 0.26 floor is
+# what sets the shared vLLM version; nothing in TTS or MT contradicts it.
+#
+# torch is deliberately absent: vLLM pins it exactly, so any floor here either
+# duplicates that pin or contradicts it and makes the extra unsatisfiable.
+#
+# vllm carries a floor rather than a pin because its CUDA wheels publish a local
+# version (`0.26.0+cu129`) that `==` cannot match; install.sh pins the exact version
+# on the command line instead.
+#
+# Inference, serving, layout training and eval. There is no recognizer *training* stage:
+# IndicBlockOCR ships as a released checkpoint and this repo has no recipe for it.
+# --------------------------------------------------------------------------- #
+ocr-infer = [
+  "vllm>=0.26",              # exact build pinned by install.sh (per-CUDA index); pins torch
+  "transformers>=5.7",       # the release that ships PPDocLayoutV3
+  "pillow>=12",
+  "numpy>=2",
+  "scipy",
+  "ninja",                   # the recognizer JIT-compiles a GDN kernel on first use
+  "accelerate",
+  "huggingface_hub>=1.0",
+  "hf_xet",
+]
+# The CLIENT side of `scripts/ocr/serve.sh`. No vllm: the recognizer runs on the server,
+# and layout runs here, so this installs on a laptop. torch and transformers are for the
+# 133 MB layout model, which is CPU-friendly.
+ocr-serve = [
+  "openai>=2.0.0",
+  "torch",
+  "transformers>=5.7",
+  "pillow>=12",
+  "numpy>=2",
+  "scipy",
+  "huggingface_hub>=1.0",
+]
+
+# --------------------------------------------------------------------------- #
+# ASR (bodhan_genai.asr) — IndicTranscribe: speech recognition for Indic languages.
+#
+# Shares the one environment. ASR imports no vLLM at all, so unlike TTS/MT/OCR it
+# places no constraint on the vLLM line; it follows the shared torch and
+# transformers versions rather than setting them.
+#
+# The branch pinned transformers 5.5.3; that pin was a snapshot of the environment
+# ASR was developed in, not a requirement, and the shared 5.13.1 is verified here.
+# --------------------------------------------------------------------------- #
+asr-infer = [
+  "torch>=2.11",
+  "torchaudio>=2.11",
+  "transformers==5.13.1",
+  "sentencepiece==0.2.2",
+  "safetensors==0.8.0",
+  "soundfile==0.14.0",
+  "numpy>=2.3",
+]
+# Ray Serve replicas behind a websocket + HTTP service.
+asr-serve = [
+  "bodhan-genai[asr-infer]",
+  "ray[serve]==2.57.0",
+  "fastapi>=0.133,<0.137",
+  "uvicorn==0.52.1",
+  "websockets==17.0.1",
+]
+
+# `all` is every modality — they share one environment. The per-modality aggregates
+# also serve lean installs.
+all-tts = ["bodhan-genai[tts-data,tts-train,tts-infer,tts-serve]"]
+all-mt = ["bodhan-genai[mt-data,mt-train,mt-infer,mt-serve,mt-eval]"]
+# Data prep + layout training. No vllm: the recognizer is not trained here, and the
+# detector is a 33M torch model. albumentations is the augmentation recipe; it drags in
+# OpenCV, so training degrades gracefully without it rather than failing to import.
+ocr-train = [
+  "torch>=2.11",
+  "transformers>=5.7",
+  "accelerate>=1.14",
+  "albumentations>=1.4",
+  "pillow>=12",
+  "numpy>=2",
+  "scipy",
+  "pyyaml>=6.0",
+  "wandb>=0.28",
+]
+# Scoring. Pure-python metrics over predictions, so this installs anywhere; the layout
+# eval additionally needs [ocr-infer] because it drives the real detector.
+ocr-eval = [
+  "numpy>=2",
+  "scipy",
+  "pillow>=12",
+]
+all-ocr = ["bodhan-genai[ocr-infer,ocr-serve,ocr-train,ocr-eval]"]
+all-asr = ["bodhan-genai[asr-infer,asr-serve]"]
+all = ["bodhan-genai[all-tts,all-mt,all-ocr,all-asr]"]
+dev = [
+  "pytest==9.1.1",
+  "ruff>=0.14",
+  "pre-commit>=4.0",
+  "build>=1.2",
+  "twine>=6.0",
+]
+# Documentation site (mkdocs.yml). mkdocstrings reads the source statically via
+# griffe, so building the docs needs none of the GPU stack — which is the whole
+# reason this is MkDocs and not Sphinx autodoc.
+docs = [
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.27",
+  "ruff>=0.14",           # mkdocstrings formats signatures with it
+]
+
+[project.urls]
+Repository = "https://github.com/AshwinSankar17/bodhan_gen_ai_tools"
+Changelog = "https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bodhan_genai"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "E501",   # line length is the formatter's job
+  "SIM108", # ternaries are not always clearer than if/else
+]
+
+[tool.ruff.lint.per-file-ignores]
+# service.py embeds a demo HTML/JS page whose regexes contain real typographic
+# apostrophes. A `# noqa` cannot reach them: they are inside a Python string, so the
+# marker would be emitted into the JavaScript rather than read by ruff.
+"src/bodhan_genai/asr/serving/service.py" = ["RUF001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bodhan_genai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "gpu: requires a CUDA GPU (deselected in CI)",
+  "slow: long-running (deselected in CI)",
+]

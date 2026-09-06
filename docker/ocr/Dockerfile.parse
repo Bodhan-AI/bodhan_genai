@@ -1,0 +1,79 @@
+# syntax=docker/dockerfile:1
+# IndicOCR batch image: page images in, markdown + per-block JSON out.
+#
+# A batch image, not a serving one — the entrypoint is the CLI, so the container
+# runs a job and exits.
+#
+# Build (repo root):  docker build -f docker/ocr/Dockerfile.parse -t bodhan-ocr-parse .
+# Run:                scripts/ocr/parse_docker.sh  (see src/bodhan_genai/ocr/README.md)
+
+# Must match the cu129 wheels below; change the tag and both index URLs together.
+FROM nvidia/cuda:12.9.1-base-ubuntu24.04
+
+# build-essential is required, not incidental: Triton compiles a CUDA driver shim at
+# engine startup and needs a host C compiler.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+
+WORKDIR /app
+ENV UV_PYTHON_INSTALL_DIR=/opt/python \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# --- dependencies (cached until the pins change) ----------------------------
+COPY .python-version constraints.txt pyproject.toml README.md LICENSE NOTICE ./
+
+RUN uv venv /opt/venv --python "$(cat .python-version)"
+
+# vLLM first, and pinned: it pins an exact torch and will uninstall a different one,
+# so let it choose. The pin is exact because PyPI and the per-CUDA wheel publish
+# different dependencies for the same version, which a range cannot resolve.
+
+# This stack spans PyPI plus the vLLM and PyTorch CUDA indexes.
+# unsafe-best-match lets uv resolve across all three.
+RUN uv pip install "vllm==0.26.0" \
+      --extra-index-url https://wheels.vllm.ai/0.26.0/cu129 \
+      --extra-index-url https://download.pytorch.org/whl/cu129 \
+      --index-strategy unsafe-best-match
+
+# PPDocLayoutV3 needs transformers >= 5.7; keep vLLM's pin if it already clears it.
+RUN python -c 'import transformers,sys; v=tuple(int(x) for x in transformers.__version__.split(".")[:2]); sys.exit(0 if v>=(5,7) else 1)' \
+      || uv pip install "transformers>=5.7" --index-strategy unsafe-best-match
+
+# --- package (rebuilds on src changes; deps above stay cached) ---------------
+# The vLLM index is deliberately not repeated here: vllm is already installed and
+# satisfies the extra's floor.
+COPY src/ src/
+COPY configs/ocr/ configs/ocr/
+RUN uv pip install -e ".[all-ocr]" \
+      --constraint constraints.txt \
+      --extra-index-url https://download.pytorch.org/whl/cu129 \
+      --index-strategy unsafe-best-match
+
+# --- runtime -----------------------------------------------------------------
+# Weights are not baked in: mount a checkpoint per stage with BODHAN_OCR_*_CKPT, or
+# let them resolve from the Hub. Mount /models to keep the download and the compiled
+# kernels across runs.
+#
+# HOME and USER are set because the container runs as the caller's uid (see
+# parse_docker.sh), which has no passwd entry: torch reads USER, and both torch and
+# Triton write caches under HOME.
+ENV PYTHONUNBUFFERED=1 \
+    HF_HOME=/models/hf-cache \
+    FLASHINFER_WORKSPACE_BASE=/models/flashinfer \
+    HOME=/tmp \
+    USER=ocr \
+    TORCHINDUCTOR_CACHE_DIR=/models/torchinductor \
+    TRITON_CACHE_DIR=/models/triton
+
+# The container runs as an arbitrary caller uid, so these paths must be writable
+# even when no volume is mounted.
+RUN mkdir -p /models/hf-cache /models/flashinfer/.cache/flashinfer \
+      /models/torchinductor /models/triton /in /out \
+ && chmod -R 0777 /models /in /out /tmp
+
+ENTRYPOINT ["python", "-m", "bodhan_genai.ocr.inference.cli"]
+CMD ["--help"]

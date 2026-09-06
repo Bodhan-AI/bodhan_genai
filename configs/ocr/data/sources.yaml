@@ -1,0 +1,85 @@
+# Training corpus for IndicDocLayout: the sources, where they live, and the batch mix.
+#
+# This file DOCUMENTS the corpus. The datasets themselves are not shipped — they are
+# large and separately licensed. Stage each source under `<data_root>/<path>/` as:
+#
+#     <data_root>/<path>/
+#         images/<stem>.{png,jpg}      page images
+#         jsons/<stem>.json            per-page annotation
+#
+# Annotation schema, one JSON per page. Note the bbox is **y first**, 0..1000:
+#
+#     {
+#       "content": [
+#         {"bbox": [y0, x0, y1, x1], "label": "Paragraph", "reading_order": 1}
+#       ],
+#       "metadata": {"header": {"bbox": [...]}, "footer": {"bbox": [...]}}
+#     }
+#
+# `label` must be one of the 37 classes in bodhan_genai.ocr.data.taxonomy. Anything else
+# is dropped silently — the taxonomy is a closed set and a typo'd label is not an error
+# the parser can distinguish from a class this source legitimately does not annotate.
+#
+# Build the manifests, then pack the cache:
+#     scripts/ocr/splits.sh
+#     scripts/ocr/pack.sh
+
+data_root: data
+
+# `policy` decides how a source is split:
+#   native  — the source ships manifest_by_split.json; use it
+#   holdout — val/test stems were fixed before this pipeline; pin them (list them here)
+#   hash    — deterministic 80/10/10 on md5(stem)
+#
+# `weight` is this source's share of EVERY batch, not of the epoch. The sampler
+# apportions each batch to these ratios exactly, so the mix holds at every optimizer
+# step and on every DDP rank. Weights are normalized, so they need not sum to 1.
+sources:
+  - name: hw-vs
+    path: hw-vs
+    domain: handwritten
+    image_ext: .png
+    policy: holdout        # a val/test set already exists for this source
+    weight: 0.30
+
+  - name: hw-dps
+    path: hw-dps
+    domain: handwritten
+    image_ext: .jpg
+    policy: hash
+    weight: 0.10
+
+  - name: hw-loc
+    path: hw-loc
+    domain: handwritten
+    image_ext: .jpg
+    policy: hash
+    weight: 0.10
+
+  - name: hw-iitm
+    path: hw-iitm
+    domain: handwritten
+    image_ext: .jpg
+    policy: hash
+    weight: 0.10
+
+  - name: ncert-scert
+    path: ncert-scert
+    domain: printed
+    image_ext: .jpg
+    policy: holdout
+    weight: 0.20
+
+  - name: indicdlp-printed
+    path: indicdlp-printed
+    domain: printed
+    image_ext: .png
+    policy: native         # the only source carrying the 27-36 furniture classes
+    weight: 0.15
+
+  - name: printed-nat-archives
+    path: printed-nat-archives
+    domain: printed
+    image_ext: .jpg
+    policy: hash
+    weight: 0.05

@@ -1,0 +1,36 @@
+# Keep the build context to what the image actually copies.
+.git
+.github
+.venv
+.ruff_cache
+.pytest_cache
+__pycache__
+**/__pycache__
+*.egg-info
+dist
+build
+
+# run artifacts / data
+out
+notebook_out
+notebook_train
+wandb
+checkpoints
+training_checkpoints
+eval_results
+*.wav
+*.parquet
+*.log
+
+# not needed inside the serving image
+tests
+docs
+notebooks
+examples
+configs
+.claude
+
+# ...except the OCR batch image, which ships its YAML defaults so `--config
+# configs/ocr/infer/parse.yaml` works inside the container the way it does outside.
+!configs/ocr
+!configs/ocr/**

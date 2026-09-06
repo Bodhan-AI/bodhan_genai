@@ -1,0 +1,72 @@
+name: claude-review
+
+# Automatic review on every pull request. Interactive follow-up ("@claude ...")
+# is handled by claude.yml.
+#
+# Requires the ANTHROPIC_API_KEY repository secret. Without it the job fails
+# fast rather than silently passing, so a missing secret is visible.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the action can diff against the base branch.
+          fetch-depth: 0
+
+      - name: Fail early when the API key is absent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set — add it under" \
+                 "Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request and leave inline comments on real problems only.
+
+            This repository ships three model modalities that all share ONE
+            environment (transformers 5.13.1 / vllm 0.26.0 / torch 2.11.0):
+            `bodhan_genai.tts` (Llama-3.2-3B + SNAC), `bodhan_genai.mt` (Gemma-4-E4B
+            Indic translation) and `bodhan_genai.ocr` (IndicOCR). A change that
+            re-splits them, or that pins a dependency exactly where a range is needed
+            to keep them co-installable, is a regression. Weight this review
+            accordingly:
+
+            - Correctness bugs, especially ones the CPU test suite cannot catch.
+            - Anything that changes the MT prompt contract
+              (`src/bodhan_genai/mt/templates/prompt.py`). The contract names only the
+              target language and uses exactly one user turn; a violation still
+              produces fluent output, so it fails silently and costs measurable
+              chrF++. Treat any drift here as high severity.
+            - Dependency changes that could let one modality's pins leak into the
+              other, or that weaken a lock: `pyproject.toml`, `constraints*.txt`,
+              `requirements-ci*.txt`, `install.sh`.
+            - Metric definitions in `src/bodhan_genai/mt/eval/` — chrF++ requires
+              `word_order=2`; plain chrF looks close enough to pass a casual review.
+            - Test files whose basename already exists under another modality's test
+              directory: pytest resolves test modules by basename, so a duplicate
+              shadows its twin and breaks collection for both.
+
+            Skip style nits that `ruff` already enforces. If the change is clean, say
+            so briefly instead of inventing findings.
+          claude_args: --max-turns 25

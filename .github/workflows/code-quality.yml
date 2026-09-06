@@ -1,0 +1,59 @@
+name: code-quality
+
+# NOTE ON CODEQL: this workflow deliberately does not run github/codeql-action.
+# Code scanning on a PRIVATE repository requires GitHub Advanced Security; without
+# it the action fails at upload with "Code scanning is not enabled for this
+# repository", which is a permanently red job rather than a signal. If GHAS is
+# enabled later (or the repo is made public), add a codeql job with
+# `security-events: write` and it will work as-is. Until then bandit covers the
+# same ground for Python and actually runs here.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Advisories move independently of this repo, so re-scan weekly.
+    - cron: "0 4 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install bandit
+      # Gate on HIGH only. The tree currently reports 0 high and 27 medium, of
+      # which 23 are B615 (Hugging Face downloads without a pinned revision) —
+      # a real supply-chain tradeoff to decide deliberately, not something to
+      # block a push on. Mediums are printed for visibility in the step below.
+      - name: bandit (gate on high severity)
+        run: bandit -r src/ -lll
+      - name: bandit (medium and low, informational)
+        continue-on-error: true
+        run: bandit -r src/ -ll
+
+  # Advisory: the codebase is partially annotated and mypy currently reports
+  # pre-existing errors in the tts package. Reported, never blocking — tighten by
+  # removing continue-on-error once a package is clean, one package at a time.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install mypy
+      - name: mypy (advisory)
+        continue-on-error: true
+        # No GPU deps on the runner, so third-party stubs are unavailable —
+        # check the source in isolation rather than chasing missing imports.
+        run: mypy src/bodhan_genai --ignore-missing-imports --no-strict-optional

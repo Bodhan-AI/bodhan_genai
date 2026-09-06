@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Environments
+.env
+.venv/
+venv/
+
+# ML / run artifacts
+wandb/
+checkpoints/
+training_checkpoints/
+outputs/
+eval_results/
+data/tokenized/
+data/compiled/
+*.wav
+*.parquet
+*.tar
+*.log
+*.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# local smoke-test artifacts (scripts, logs, wavs)
+out/
+
+# internal-only: release/load-test tooling, kept local
+src/bodhan_genai/tts/bench/
+src/bodhan_genai/tts/serving/loadtest.py
+tests/tts/test_bench_*.py
+docs/internal/
+
+# Internal working notes — never part of the public package.
+# Everything under internal-docs/ is ignored; the rule itself is tracked.
+internal-docs/
+
+# local venv (one for every modality — see install.sh)
+.venv/
+
+# mkdocs build output
+site/
+
+# OCR model weights — resolved from the HF repo at runtime, never committed
+weights/

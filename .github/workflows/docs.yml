@@ -1,0 +1,72 @@
+name: docs
+
+# Builds on every PR (so a broken link or a bad reference fails review) and, when
+# Pages is available, deploys from master.
+#
+# The build needs NO GPU stack and does not install the package: mkdocstrings
+# reads the source with griffe, statically. That is why this job takes seconds
+# rather than a CUDA wheel download.
+#
+# ON PUBLISHING: GitHub Pages is not available for this repository — it is private
+# on a plan that does not include Pages, and the API refuses to enable it
+# ("Your current plan does not support GitHub Pages for this repository"). The
+# deploy job below is therefore gated on a repository variable rather than left to
+# fail on every push, because a permanently red check is worse than no check.
+# To turn publishing on once Pages is available:
+#   1. Settings > Pages > Source: GitHub Actions
+#   2. Settings > Secrets and variables > Actions > Variables: ENABLE_PAGES = true
+# Until then the built site is attached to every run as a downloadable artifact.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install "mkdocs>=1.6" "mkdocs-material>=9.5" "mkdocstrings[python]>=0.27" "ruff>=0.14"
+      # --strict: broken links and missing nav entries fail the build. One griffe
+      # warning class is filtered in scripts/docs/mkdocs_hooks.py; everything else
+      # still errors.
+      - run: mkdocs build --strict
+
+      # Always attached, so the rendered site is reviewable from any run — this is
+      # the only way to read it while Pages is unavailable.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site
+          retention-days: 14
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/master' && vars.ENABLE_PAGES == 'true'
+        with:
+          path: site
+
+  # Separate job so a PR build never touches the live site.
+  deploy:
+    if: github.ref == 'refs/heads/master' && vars.ENABLE_PAGES == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

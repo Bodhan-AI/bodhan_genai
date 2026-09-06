@@ -1,0 +1,143 @@
+site_name: Bodhan GenAI
+site_description: Model tooling for Bodhan's generative models — TTS, MT and OCR.
+repo_url: https://github.com/AshwinSankar17/bodhan_gen_ai_tools
+repo_name: bodhan_gen_ai_tools
+edit_uri: edit/master/docs/
+
+# MkDocs rather than Sphinx for one deciding reason: mkdocstrings reads the source
+# with griffe, STATICALLY. Sphinx's autodoc imports every module it documents, and
+# ten modules here import torch / vllm / ray / snac at module level, so an
+# import-based build would need the full CUDA stack on the docs runner or a long
+# list of mocks that silently rots. Nothing here imports the package.
+# (sphinx-autoapi is also static; MkDocs wins the tiebreak because every doc in
+# this repo is already Markdown and needs no myst layer.)
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+# Broken links, missing nav entries and bad references fail the build: the docs are
+# built with `mkdocs build --strict`, which promotes every warning to an error.
+# One warning class is filtered out in the hook below — see scripts/docs/mkdocs_hooks.py.
+hooks:
+  - scripts/docs/mkdocs_hooks.py
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  # Mermaid fences render as diagrams rather than literal code blocks. GitHub renders
+  # ```mermaid natively too, so one source serves both the site and the package READMEs
+  # (which are not in this nav and are read on GitHub).
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+nav:
+  - Home: index.md
+  - Troubleshooting: troubleshooting.md
+  - TTS:
+      - Overview: tts/index.md
+      - End to end: tts/end-to-end.md
+      - Token layout: tts/token_layout.md
+      - Data pipeline: tts/data_pipeline.md
+      - Training: tts/training.md
+      - Inference: tts/inference.md
+      - Serving: tts/serving.md
+      - Eval: tts/eval.md
+      - Configs: tts/configs.md
+      - Release qualification: tts/release.md
+  - MT:
+      - Overview: mt/index.md
+      - End to end: mt/end-to-end.md
+      - Prompt contract: mt/prompt_contract.md
+      - Data pipeline: mt/data_pipeline.md
+      - Training: mt/training.md
+      - Serving: mt/serving.md
+      - Eval: mt/eval.md
+      - Configs: mt/configs.md
+  - OCR:
+      - Overview: ocr/index.md
+      - End to end: ocr/end-to-end.md
+      - The contract: ocr/contract.md
+      - Data & training: ocr/training.md
+      - Serving: ocr/serving.md
+      - Configs: ocr/configs.md
+      - Model card: ocr/model_card.md
+  - ASR:
+      - Overview: asr/index.md
+      - End to end: asr/end-to-end.md
+      - Usage: asr/usage.md
+      - Model and port: asr/model.md
+      - Serving: asr/serving.md
+      - Configs: asr/configs.md
+      - Caveats: asr/caveats.md
+  - API reference:
+      - TTS: reference/tts.md
+      - MT: reference/mt.md
+      - OCR: reference/ocr.md
+      - ASR: reference/asr.md
+
+not_in_nav: |
+  /README.md
+
+# Planning artefacts live under docs/ for authoring convenience; they are not product
+# documentation and are excluded from the built site entirely.
+exclude_docs: |
+  superpowers/
+  internal/

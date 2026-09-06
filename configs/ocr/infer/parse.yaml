@@ -1,0 +1,34 @@
+# IndicOCR: both stages (bodhan_genai.ocr.inference.cli parse).
+#
+# Loaded via `--config configs/ocr/infer/parse.yaml`; nested sections are flattened onto the
+# argparse dests and explicit CLI flags always override these values. Unknown keys fail loudly,
+# so this file and the CLI cannot drift.
+
+layout:
+  # Detection score floor. Below ~0.4, stains, rules and page borders start scoring as blocks.
+  conf: 0.5
+  img_size: 1024
+  device: cuda
+
+dedup:
+  nest: true
+  # both -- an equation box is folded into either a text block (inline math, already rendered as
+  # $...$ by the text prompt) or a larger equation (a display array stays one block).
+  # NOTE: the published olmOCR-Bench number was measured with `text_only`; `both` is the shipped
+  # default and is pending re-measurement. See docs/ocr/model_card.md.
+  mode: both
+  contain: 0.90
+
+crop:
+  # Crops below this side^2 are upscaled -- the largest single measured quality win. Set to 0 to
+  # disable upscaling: LANCZOS can blur already-degraded old-scan glyphs.
+  min_px_side: 256
+  max_px_side: 1536
+  pad_px: 0
+
+recognizer:
+  gpu_memory_utilization: 0.80
+  max_tokens: 2048
+  batch_size: 2048
+  # html preserves colspan/rowspan and in-cell line breaks; markdown cannot express them.
+  table_format: html

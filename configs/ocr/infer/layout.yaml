@@ -1,0 +1,14 @@
+# IndicDocLayout only (bodhan_genai.ocr.inference.cli layout).
+#
+# Stage 1 loads torch and nothing else -- no vLLM, no recognizer weights -- so this runs on a
+# much smaller GPU than the full pipeline.
+
+layout:
+  conf: 0.5
+  img_size: 1024
+  device: cuda
+
+dedup:
+  nest: true
+  mode: both
+  contain: 0.90

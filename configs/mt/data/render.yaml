@@ -1,0 +1,55 @@
+# bodhan_genai.mt — bitext -> instruction chat rows.
+#
+#   python -m bodhan_genai.mt.data.render --config configs/mt/data/render.yaml
+#   python -m bodhan_genai.mt.data.render --config … --dry-run   # counts only
+#
+# Output feeds configs/mt/train/lora.yaml directly.
+#
+# Run any upsampling or corpus mixing BEFORE this stage: the template RNG advances
+# per row, so N copies of a row get N different phrasings (useful augmentation),
+# while copies made afterwards would all share one phrasing.
+
+seed: 42
+
+# target_only  — names only the target language ("into Hindi"). THE RELEASED
+#                CONTRACT. Use this unless you have a specific reason not to.
+# with_source  — names both ("from English to Hindi"). Only for a single fixed
+#                direction, and then eval and serving must use it too.
+template_variant: "target_only"
+
+# Drop exact duplicate (direction, source, target) triples across all sources.
+dedup: true
+
+# Languages outside the served set, so a corpus can cover one without editing the
+# frozen prompt contract. e.g.  xyz_Deva: "Some Language"
+extra_languages: {}
+
+output:
+  train: "data/mt/rendered/train.jsonl"
+  dev: "data/mt/rendered/dev.jsonl"
+  dev_fraction: 0.01    # held out for eval_loss / early stopping
+  dev_max_rows: 2000    # eval runs every few hundred steps; a huge dev set just
+                        # burns wall-clock for no extra signal
+
+# One entry per corpus and language pair. src_field / tgt_field name the JSONL
+# columns holding the text; src_lang / tgt_lang are FLORES-style codes.
+sources:
+  - name: "bpcc-hin"
+    path: "data/mt/bitext/bpcc_eng_hin.jsonl"
+    src_field: "eng"
+    tgt_field: "hin"
+    src_lang: "eng_Latn"
+    tgt_lang: "hin_Deva"
+    # Bitext is normally stored one-way. 1.0 also emits every row reversed,
+    # making the corpus fully bidirectional; 0.2 is a reasonable setting for a
+    # token-heavy document corpus where you want mostly one direction.
+    reverse_fraction: 1.0
+    limit: null         # cap input rows for a smoke run
+
+  # - name: "bpcc-tam"
+  #   path: "data/mt/bitext/bpcc_eng_tam.jsonl"
+  #   src_field: "eng"
+  #   tgt_field: "tam"
+  #   src_lang: "eng_Latn"
+  #   tgt_lang: "tam_Taml"
+  #   reverse_fraction: 1.0

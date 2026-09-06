@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1
+# TTS serving image: Ray Serve + vLLM AsyncLLM + in-process SNAC, exposing
+# three endpoints on one engine — WS /tts (live streaming), WS /tts/chunked
+# (long-form chunked streaming), POST /tts/offline (complete audio/wav).
+#
+# Mirrors install.sh's conda-free, uv-first story: CUDA base for the NVIDIA
+# runtime hooks, standalone CPython pinned by .python-version, vLLM first from its
+# per-CUDA wheel index (it pulls its own matched torch), everything under
+# constraints.txt. flash-attn is intentionally absent — it is a TTS *training*
+# dep; vLLM ships its own attention kernels.
+#
+# Build (repo root):  docker build -f docker/tts/Dockerfile.serve -t bodhan-tts-serve .
+# Run:                scripts/tts/serve_docker.sh  (see README "Serve with Docker")
+
+FROM nvidia/cuda:12.9.1-base-ubuntu24.04
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# uv 0.11+: 0.6 cannot fetch the CPython the .python-version pins, so the venv step fails.
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+
+WORKDIR /app
+ENV UV_PYTHON_INSTALL_DIR=/opt/python \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# --- dependency layers (cached until the pins change) -----------------------
+COPY .python-version constraints.txt pyproject.toml README.md LICENSE NOTICE ./
+
+RUN uv venv /opt/venv --python "$(cat .python-version)"
+
+# Required order (see install.sh): vLLM FIRST from its per-CUDA index, letting it
+# pull its own matched torch — pre-pinning torch leaves a half-installed torch behind
+# on 0.26. The per-CUDA index also keeps a later resolve from swapping in CPU wheels.
+# uv defaults to first-index; this stack spans the vLLM per-CUDA index, the PyTorch
+# CUDA index and PyPI, so it needs best-match across all three (see install.sh).
+RUN uv pip install "vllm==0.26.0" "ray[serve]==2.57.0" \
+      --constraint constraints.txt \
+      --extra-index-url https://wheels.vllm.ai/0.26.0/cu129 \
+      --extra-index-url https://download.pytorch.org/whl/cu129 \
+      --index-strategy unsafe-best-match
+
+# torchaudio matched to the torch vLLM just pinned, from the same per-CUDA index.
+# torchvision is a vllm dependency we never import.
+RUN uv pip install torchaudio torchvision \
+      --index-url https://download.pytorch.org/whl/cu129
+
+# --- package layer (rebuilds on src changes; deps above stay cached) --------
+COPY src/ src/
+COPY scripts/tts/serve.sh scripts/tts/serve.sh
+RUN uv pip install ".[tts-serve]" \
+      --constraint constraints.txt \
+      --extra-index-url https://download.pytorch.org/whl/cu129 \
+      --index-strategy unsafe-best-match
+
+# --- runtime -----------------------------------------------------------------
+# Model weights are NOT baked in: mount them under /models (see serve_docker.sh)
+# or pass an HF id + HF_TOKEN. HF_HOME keeps any hub downloads on the mount.
+ENV RAY_ADDRESS=local \
+    VLLM_ENABLE_V1_MULTIPROCESSING=0 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/models/hf-cache
+
+EXPOSE 8000
+
+# serve.sh is the single source of truth for launch env + arg plumbing.
+# Reads CHECKPOINT (required), TOKENIZER, SNAC, NUM_REPLICAS, PORT from env;
+# extra `docker run ... <flags>` are appended to serving.app's argparse.
+ENTRYPOINT ["bash", "scripts/tts/serve.sh"]

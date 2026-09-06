@@ -1,0 +1,97 @@
+# bodhan_genai LoRA SFT configuration
+#
+# Launch with:
+#   scripts/tts/train_lora.sh configs/tts/train/lora.yaml
+# or directly:
+#   accelerate launch --config_file configs/tts/accelerate/single_node_fsdp.yaml \
+#       -m bodhan_genai.tts.training.train_lora configs/tts/train/lora.yaml
+
+# === Training stage ===
+# One of: pt | cpt | sft | ft | dpo | rlhf. Used in auto-generated wandb run names.
+training_stage: "sft"
+
+# === Model ===
+model:
+  model_path: "training_checkpoints/pretrain/checkpoint-XXXX"   # base checkpoint to attach LoRA to
+  # model_path: /path/to/checkpoints/orpheus_3B_pt
+  tokenizer_path: ""                # REQUIRED: extended audio tokenizer path (156942 tokens)
+  # tokenizer_path: /path/to/checkpoints/llama-3-audio-tok_trimmed
+  max_seq_len: 8192                 # source production run used 34816 across 16 nodes
+  attn_implementation: "flash_attention_2"
+  torch_dtype: "bfloat16"
+  activation_checkpointing: false   # FSDP owns activation checkpointing (configs/tts/accelerate/single_node_fsdp.yaml); never both
+  compile: false                    # torch.compile + PEFT + FSDP2 → recompile storms; keep off for LoRA
+  compile_mode: "max-autotune-no-cudagraphs"
+  snac_model_path: "hubertsiuzdak/snac_24khz"   # SNAC codec for audio decoding
+  # snac_model_path: /path/to/checkpoints/snac/snac_24khz
+
+# === LoRA ===
+lora:
+  r: 32
+  lora_alpha: 64                    # conventional 2 × r; effective scale = alpha/r
+  lora_dropout: 0.05
+  bias: "none"                      # none | all | lora_only
+  task_type: "CAUSAL_LM"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  # Add "embed_tokens" and "lm_head" here if the base model was NOT already
+  # resized/trained with the extended audio tokenizer — otherwise leave empty.
+  modules_to_save: []
+
+# === Data ===
+# Each dataset entry has:
+#   path:  path to a directory of .parquet files (columns: input_ids, labels, length)
+#   ratio: relative sampling weight (normalized internally)
+#   name:  identifier (for logging)
+data:
+  train:
+    packing:
+      backend: "auto"               # auto | sortedlist | bucket | numba_bucket | linear
+      rank_local: false             # pre-shard rows per rank before packing
+      equalize_rank_bins: true      # pad local bins so all ranks run same steps
+    datasets:
+      # Replace with your compiled SFT parquet directories.
+      - { path: "data/sft/train/hi", ratio: 1.0, name: "hi" }
+  val:
+    datasets:
+      - { path: "data/sft/val/hi", ratio: 1.0, name: "hi_val" }
+
+# === Training arguments (passed to transformers.TrainingArguments) ===
+training:
+  output_dir: "training_checkpoints/lora"
+  num_train_epochs: 3
+  gradient_accumulation_steps: 8
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 0.03            # float < 1 = fraction of total steps (transformers 5; warmup_ratio is deprecated)
+  lr_scheduler_type: "cosine"
+  optim: "adamw_torch_fused"
+  max_grad_norm: 1.0
+  bf16: true
+  logging_steps: 20
+  save_strategy: "steps"
+  save_steps: 250
+  eval_strategy: "steps"
+  eval_steps: 250
+  save_total_limit: null            # REQUIRED null — BestAndLastCheckpointKeeper owns retention
+  seed: 42
+  dataloader_num_workers: 8
+  dataloader_pin_memory: true
+  prefetch_factor: 8                # popped before TrainingArguments; feeds DataLoader prefetch
+  remove_unused_columns: false
+
+# === Checkpoint retention ===
+checkpoint_retention:
+  last_n: 2
+  best_k: 2
+  metric: "eval_loss"
+
+# === Logging ===
+logging:
+  wandb_project: "bodhan-genai"

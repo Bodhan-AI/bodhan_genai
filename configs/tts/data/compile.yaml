@@ -1,0 +1,37 @@
+# Stage 2 — Dataset Compilation Config
+#
+# Builds training sequences from tokenized Parquet (Stage 1 output).
+# Each input row already contains token_ids + metadata — no join needed.
+#
+# Input schema:  text, token_ids, language, speaker, style, accent,
+#                audio_caption, audio_filepath
+# Output schema: input_ids (list<int32>), labels (list<int32>), length (int32)
+#                labels are a full copy of input_ids (full-sequence loss).
+#
+# Conversation rows carry is_conversation=true plus pre-formatted conversation
+# text with <|speaker>...<speaker|> tags (see bodhan_genai.tts.templates.conversation
+# helpers); build_sequence dispatches them to the conversation template.
+#
+# Usage:
+#   python -m bodhan_genai.tts.data.compile --config configs/tts/data/compile.yaml
+
+models:
+  tokenizer_path: "/path/to/extended-tokenizer"
+  # tokenizer_path: "/path/to/checkpoints/llama-3-audio-tok_trimmed"
+
+processing:
+  training_mode: "sft"            # only "sft" — the Llama route is always full-sequence loss
+  # When true, drop the per-row `style` tag from the sequence (no style
+  # conditioning) — e.g. Rasa's CONV/NEWS/HAPPY domain+emotion labels.
+  drop_style: false
+  # Local process parallelism for shard compilation. 0 = auto.
+  num_workers: 0
+  # Optional final dataset splitting.
+  split_by_language: true
+  split_by_source: false
+
+input:
+  datasets:
+    - input_dir: "/path/to/tokenized/train/my_dataset"
+      output_dir: "/path/to/compiled/train/my_dataset"
+      source_name: "my_dataset"

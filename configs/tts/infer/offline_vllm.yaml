@@ -1,0 +1,54 @@
+# Offline batch TTS inference (bodhan_genai.tts.inference.offline_vllm).
+#
+# Loaded via `--config configs/tts/infer/offline_vllm.yaml`; nested sections are
+# flattened onto the argparse dests, and explicit CLI flags always override
+# these values. Keys must stay in sync with add_common_args()/main() in
+# src/bodhan_genai/tts/inference/offline_vllm.py.
+#
+# Still required on the CLI: --jsonl-path and --output_dir.
+
+# Indic SFT checkpoint. It bundles its own extended tokenizer, so tokenizer_path
+# can stay empty below.
+checkpoint_path: "bodhan-ai/indic-speak"
+# e.g. checkpoint_path: /path/to/training_checkpoints/llama_sft/checkpoint-XXXX
+
+# SAFE default: "" = use the checkpoint's own tokenizer. Only point this at the
+# extended tokenizer for checkpoints that were resized to it — otherwise the
+# engine's vocab and the tokenizer's ids disagree and you get garbage tokens.
+tokenizer_path: ""
+# e.g. tokenizer_path: /path/to/checkpoints/llama-3-audio-tok_trimmed
+
+snac_model_path: "hubertsiuzdak/snac_24khz"
+# e.g. snac_model_path: /path/to/checkpoints/snac/snac_24khz
+
+# Decoder: true = fine-tuned Vocos decoder (default), a path = local vocos .pt,
+# false = SNAC's own decoder. Only SNAC's quantizer is used when Vocos is on.
+vocos: true
+
+topology:
+  num_llm_workers: -1        # -1 = auto: max(1, GPU count - 1), reserving one GPU for SNAC
+  num_snac_workers: 3
+  snac_gpu_fraction: 0.33    # num_snac_workers * fraction <= 1 keeps them on one GPU
+  llm_gpu_fraction: 1.0      # 1-GPU box: set 0.8 here + 0.2 snac_gpu_fraction (and 1 worker
+                             # each, gpu_memory_utilization ~0.6) so LLM + SNAC share the card
+
+engine:
+  dtype: bfloat16
+  gpu_memory_utilization: 0.90
+  max_model_len: 8192
+  max_num_seqs: 128
+  enforce_eager: false
+  enable_prefix_caching: false
+  seed: 0
+
+sampling:
+  temperature: 0.6
+  top_p: 0.95
+  top_k: -1
+  repetition_penalty: 1.1
+  max_new_tokens: 2048       # ~24s of audio (7 tokens per ~12ms SNAC frame)
+
+io:
+  split_by_language: false
+  dedup: true
+  force_regenerate: false

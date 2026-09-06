@@ -1,0 +1,37 @@
+# Accelerate FSDP config for single-node training — activation checkpointing ON.
+#
+#   fsdp_activation_checkpointing: true   (recompute activations; ~30-40% throughput
+#                                          hit but roughly halves activation memory,
+#                                          required for long max_seq_len without OOM)
+#
+# Do NOT also set model.activation_checkpointing=true in configs/tts/train/*.yaml —
+# that enables HF-level gradient checkpointing on top, doubling recompute for no
+# benefit (train.py warns on this). The train YAMLs keep activation_checkpointing: false.
+#
+# num_processes below is a reference value; the actual value is overridden by
+# scripts/tts/train.sh via accelerate launch --num_processes at submit time.
+
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+downcast_bf16: "no"
+
+fsdp_config:
+  fsdp_version: 2
+  fsdp_activation_checkpointing: true
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_transformer_layer_cls_to_wrap: "LlamaDecoderLayer"
+  fsdp_cpu_ram_efficient_loading: false
+  fsdp_offload_params: false
+  fsdp_reshard_after_forward: true
+  # (fsdp_forward_prefetch / fsdp_sync_module_states omitted: silent no-ops
+  #  under FSDP2 in accelerate 1.13 — FSDP1-only knobs.)
+  fsdp_state_dict_type: FULL_STATE_DICT
+
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8                  # overridden by scripts/tts/train.sh --num_processes
+rdzv_backend: static
+same_network: true
+use_cpu: false

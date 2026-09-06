@@ -1,0 +1,110 @@
+# bodhan_genai.mt — LoRA finetuning, 8k context.
+#
+# PROVISIONAL RECIPE. These are working defaults, not a qualified configuration:
+# the trainer behind this schema may be replaced. See docs/mt/training.md.
+#
+# Launch with:
+#   scripts/mt/train_lora.sh configs/mt/train/lora.yaml
+# or directly:
+#   accelerate launch --config_file configs/mt/accelerate/single_node.yaml \
+#       -m bodhan_genai.mt.training.train configs/mt/train/lora.yaml
+#
+# Prepare the data first:
+#   python -m bodhan_genai.mt.data.render --config configs/mt/data/render.yaml
+
+# === Model ===
+model:
+  # Loaded with AutoModelForCausalLM — the text-only view of the multimodal
+  # checkpoint. Default is the released IndicTranslate model: finetuning starts from a
+  # model that already translates, which is what you almost always want. Adapting
+  # to a new domain or language pair continues from here, not from stock Gemma.
+  #
+  # Accepts a Hub repo id or a local directory. Gated repo: `hf auth login`.
+  # Point it at "google/gemma-4-E4B-it" only to reproduce IndicTranslate from scratch.
+  model_path: "bodhan-ai/indic-translate"
+  tokenizer_path: ""              # empty = use model_path
+  max_seq_length: 8192            # sentence corpora fit far under this; documents need it
+  torch_dtype: "bfloat16"
+  attn_implementation: "sdpa"
+  gradient_checkpointing: true    # trades compute for memory; needed at 8k
+  # Seed from an existing adapter (fresh optimizer/scheduler/LR). Requires
+  # `resume: false` — the two are mutually exclusive and the loader says so.
+  adapter_path: null
+
+# === LoRA ===
+lora:
+  r: 32
+  lora_alpha: 64                  # conventional 2 x r; effective scale = alpha/r
+  lora_dropout: 0.05
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  # "all-linear" is deliberate: Gemma 4 carries per_layer_input_gate /
+  # per_layer_projection beside the usual q/k/v/o and gate/up/down projections,
+  # and an explicit list silently misses them.
+  target_modules: "all-linear"
+  # Translation never touches the vision/audio towers; adapting them wastes
+  # parameters and memory for nothing.
+  exclude_modules:
+    - "*vision_tower*"
+    - "*visual*"
+    - "*image_encoder*"
+    - "*audio_tower*"
+    - "*embed_vision*"
+    - "*embed_audio*"
+    - "*lm_head*"
+  modules_to_save: []
+  use_rslora: false               # alpha/sqrt(r) instead of alpha/r
+  use_dora: false
+
+# === Data ===
+# Both files come from `python -m bodhan_genai.mt.data.render`. A dev set is
+# required: checkpoint selection is by eval_loss and early stopping needs it.
+data:
+  train_file: "data/mt/rendered/train.jsonl"
+  dev_file: "data/mt/rendered/dev.jsonl"
+  cache_dir: "data/mt/cache"      # tokenized dataset cache (built once, file-locked)
+  num_proc: 16
+  shuffle_seed: 42
+
+# === Resume ===
+# true  = continue an interrupted run from the last checkpoint in output_dir
+#         (optimizer/scheduler/LR/step restored)
+# false = start fresh; required when model.adapter_path is set
+resume: true
+
+# === Eval / save cadence ===
+# As a fraction of one epoch, resolved against the real dataset size at launch,
+# so this config transfers between corpora instead of carrying a step count
+# tuned for one of them. An explicit training.eval_steps overrides it.
+eval_fraction: 0.1
+
+# === Training arguments (passed to trl.SFTConfig) ===
+# max_length / packing / assistant_only_loss are set by the recipe and ignored here.
+training:
+  output_dir: "training_output/mt-lora-8k"
+  num_train_epochs: 3
+  learning_rate: 1.0e-4           # suits LoRA; full-FT would want ~1e-5
+  lr_scheduler_type: "cosine_with_min_lr"
+  lr_scheduler_kwargs:
+    min_lr: 1.0e-5                # floor the decay instead of letting it reach 0
+  warmup_steps: 0.03              # float < 1 = fraction of total steps (transformers 5)
+  max_grad_norm: 5.0
+  per_device_train_batch_size: 1  # memory-safe at 8192 tokens on an 80 GB card
+  gradient_accumulation_steps: 4  # effective batch = 1 x 4 x world_size
+  per_device_eval_batch_size: 1
+  bf16: true
+  dataset_num_proc: 16
+  logging_steps: 10
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+  early_stopping_patience: 5      # popped before SFTConfig; drives EarlyStoppingCallback
+  seed: 42
+  report_to: "wandb"
+
+# === Logging ===
+logging:
+  wandb_project: "bodhan-genai-mt"
+  wandb_run_name: null            # defaults to the trainer's own naming
+  report_to: "wandb"              # set "none" to disable

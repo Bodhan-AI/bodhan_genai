@@ -1,0 +1,17 @@
+bodhan-genai
+Copyright 2026 Bodhan GenAI TTS Team
+
+Licensed under the Apache License, Version 2.0.
+
+This project builds on the following upstream work:
+- Orpheus TTS (Canopy Labs) — the Llama-3.2-3B speech-token recipe and
+  streaming sliding-window decode scheme (https://github.com/canopyai/Orpheus-TTS).
+- SNAC — Multi-Scale Neural Audio Codec by Hubert Siuzdak
+  (https://github.com/hubertsiuzdak/snac), used as the 24 kHz audio codec.
+- Llama 3.2 (Meta) — base language model architecture and tokenizer.
+- NVIDIA NeMo (https://github.com/NVIDIA/NeMo, Apache License 2.0),
+  Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved. The IndicTranscribe
+  ASR model (`bodhan_genai.asr.model`) is a numerics-preserving, NeMo-
+  independent HuggingFace-style port of NeMo's FastConformer encoder +
+  Transformer decoder (Canary-2 AED architecture), feature front-end, and
+  aggregate tokenizer, for inference parity with a NeMo-trained checkpoint.

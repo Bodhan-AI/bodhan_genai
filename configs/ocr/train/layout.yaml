@@ -1,0 +1,65 @@
+# IndicDocLayout: detection + reading order, one pass.
+#
+#   scripts/ocr/train.sh
+#   scripts/ocr/train.sh --max-steps 20      # smoke-test the recipe first
+#
+# Every key here maps to a field of LayoutTrainConfig. An unknown key raises rather than
+# being ignored, so a typo fails at startup instead of three days in.
+
+# --- data ---------------------------------------------------------------------
+cache_prefix: data/cache/layout_train
+val_manifest: data/manifests/layout_val.json
+image_size: 1024
+
+# Share of every batch, by source name. Must name sources that exist in the packed
+# cache; anything else raises. Leave empty for a uniform mix.
+source_weights:
+  hw-vs: 0.30
+  hw-dps: 0.10
+  hw-loc: 0.10
+  hw-iitm: 0.10
+  ncert-scert: 0.20
+  indicdlp-printed: 0.15
+  printed-nat-archives: 0.05
+
+# --- model --------------------------------------------------------------------
+# Warm start. Backbone, encoder, decoder, mask AND order heads come from here; only the
+# classification heads are re-initialized for our taxonomy.
+checkpoint: PaddlePaddle/PP-DocLayoutV3
+# Weight on the reading-order loss relative to detection. At 5.0 the two losses are
+# roughly comparable in magnitude once detection has settled; much higher and detection
+# degrades, much lower and the order head barely moves off its pretrained state.
+lambda_order: 5.0
+
+# --- optimisation -------------------------------------------------------------
+epochs: 12
+batch_size: 8
+grad_accum: 2
+learning_rate: 1.0e-4
+# An order of magnitude below the head rate: the backbone arrives document-pretrained
+# and driving it at the head's rate erases that in the first few hundred steps.
+backbone_learning_rate: 1.0e-5
+weight_decay: 1.0e-4
+warmup_steps: 500
+# Deliberately tight. Hungarian matching makes the loss discontinuous, so a step that
+# flips an assignment produces a very large gradient; without this one batch can wreck
+# a run that is otherwise converging.
+max_grad_norm: 0.1
+seed: 0
+
+# --- ema ----------------------------------------------------------------------
+# Both the live weights and the EMA shadow are saved at every checkpoint. EMA is usually
+# the better model on this corpus, but not always, and re-running is expensive.
+use_ema: true
+ema_decay: 0.9998
+ema_warmup: 2000
+
+# --- runtime ------------------------------------------------------------------
+output_dir: runs/layout
+num_workers: 8
+log_every: 50
+save_every_epochs: 1
+eval_every_epochs: 1
+bf16: true
+# wandb_project: bodhan-ocr-layout
+# run_name: layout-run7-full
