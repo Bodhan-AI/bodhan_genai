@@ -121,6 +121,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning documents (`docs/superpowers/`) are excluded from the built site and from the public
   snapshot; they are working notes, not documentation.
 
+### Added — enforcement
+
+- **`scripts/rename_gate.sh` runs in pre-commit and CI**, and covers identifiers *deleted*
+  as well as renamed. It existed through the whole rename and nothing ran it, so it caught
+  only what someone remembered to run it against: `TTS_AUTH_ALLOW_OPEN` survived in
+  `examples/tts/streaming_client.py` through three sweeps, describing a requirement that had
+  become the opposite of the default. A gate nobody runs is a gate that does not exist. It
+  greps the whole tree rather than the staged files, because a dead reference is usually in a
+  file the commit never touches.
+
 ### Verified — the rename, and the released weights
 
 - **All four models, on the pinned environment, against the released weights** — 10/10 stages of

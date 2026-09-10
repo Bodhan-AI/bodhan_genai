@@ -147,6 +147,17 @@ ruff format .
 
 Both run in pre-commit and CI; running them locally first saves a round trip.
 
+`scripts/rename_gate.sh` runs there too. It fails on any identifier that no longer exists,
+whether renamed (the pre-rename engine and model names) or deleted outright (the retired
+serving-auth gate variables). The two patterns live in the script; it is deliberately the only
+place outside `CHANGELOG.md` that spells them out, so grepping for a dead name finds the gate
+rather than a doc that still recommends it.
+
+**When you remove or rename a public name, add it there in the same commit** — that is what
+makes the removal stick. The gate greps the whole tree rather than the staged files on purpose:
+a stale reference is usually in a file your commit never touches, which is how a retired
+variable survived in `examples/` through three separate sweeps while the gate sat unwired.
+
 ## Commit style
 
 Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` — scope optional

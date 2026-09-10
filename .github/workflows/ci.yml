@@ -20,6 +20,9 @@ jobs:
       - run: pip install ruff
       - run: ruff check .
       - run: ruff format --check .
+      # The dead-name gate greps the tracked tree, so it needs the checkout and nothing else.
+      # fetch-depth above is the default shallow clone, which `git grep` is fine with.
+      - run: scripts/rename_gate.sh
 
   # One job for the whole suite: both modalities share an environment, so there is
   # one dependency set to install and no reason to split.

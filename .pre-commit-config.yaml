@@ -16,3 +16,15 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=1024]
       - id: debug-statements
+  - repo: local
+    hooks:
+      # Dead identifiers -- renamed or deleted -- must not survive anywhere in the tree.
+      # `pass_filenames: false` and `always_run: true` because the gate greps the whole
+      # repo itself: a stale reference usually sits in a file the commit does not touch,
+      # which is exactly how one survived three sweeps.
+      - id: rename-gate
+        name: dead-name gate
+        entry: scripts/rename_gate.sh
+        language: script
+        pass_filenames: false
+        always_run: true
