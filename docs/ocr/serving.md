@@ -33,7 +33,8 @@ prompt the offline path builds: the template branches on `'image' in item or 'im
 so OpenAI-style content and the local form collapse to the same string. Served output therefore
 follows the offline path rather than approximating it.
 `tests/ocr/test_serving_client.py` asserts this against the shipped template when
-`BODHAN_OCR_RECOGNIZER_CKPT` is set.
+`BODHAN_OCR_RECOGNIZER_CKPT` is set (with `BODHAN_GENAI_DEPLOYMENT=1`, since the variable is
+otherwise ignored).
 
 ## Files
 
@@ -74,10 +75,42 @@ python -m bodhan_genai.ocr.serving.client pages/ -o out/
 | `TENSOR_PARALLEL_SIZE` | `1` | needs that many devices in `GPU` |
 | `DATA_PARALLEL_SIZE` | `1` | replicate across GPUs; the right knob for this model |
 | `ENFORCE_EAGER` | `0` | `1` restores the offline configuration |
+| `OCR_API_KEY` | unset (server is **open**) | opt in: bearer token the server then demands; see [Authentication](#authentication) |
 
 The weights live in a `weights/ocr` subfolder, which `vllm serve` cannot address, so the script
-resolves a local path through `ocr.engine.checkpoints.resolve_ckpt` first. That honours
-`BODHAN_OCR_RECOGNIZER_CKPT` and a bundled `weights/` for free.
+resolves a local path through `ocr.engine.checkpoints.resolve_ckpt` first. That honours an
+explicit `CHECKPOINT`, then the published default. Inside a deployment image
+(`BODHAN_GENAI_DEPLOYMENT=1`) it also honours `BODHAN_OCR_RECOGNIZER_CKPT` and a bundled
+`weights/` — see [Configs](configs.md#checkpoints) for why those are gated.
+
+### Authentication
+
+**Off by default** — a reference server starts with no arguments. Stock `vllm serve` enforces a
+bearer token itself, so opting in needs nothing from us:
+
+```bash
+export OCR_API_KEY=$(openssl rand -hex 32)
+scripts/ocr/serve.sh
+```
+
+The launcher hands it to vLLM as `VLLM_API_KEY` in the environment, **not** `--api-key` on the
+command line: a process's argv is readable by any account on the node (`ps -eo args`), so the
+flag would publish the token to every user on a shared box.
+
+Clients send it the way every OpenAI SDK already does. OCR's `HttpRecognizer` reads `OCR_API_KEY` from the
+environment, so exporting the same value you launched with is enough:
+
+```bash
+export OCR_API_KEY=<token>                       # picked up by the client
+curl -H "Authorization: Bearer <token>" http://localhost:8000/v1/models
+```
+
+An open server ignores the header, so leaving the variable exported is harmless.
+
+!!! warning "The open default binds `0.0.0.0`"
+    Anyone who can reach the node can use the GPU behind it. A bearer token over plain HTTP is
+    also readable in flight. Put a TLS reverse proxy in front, or bind to localhost and tunnel,
+    for anything past a trusted network.
 
 ### Why each flag is there
 
@@ -174,5 +207,7 @@ run it on the same device, before concluding anything about the recognizer.
   whole pages rather than crops. The endpoint has no way to detect this.
 - **`N/M crops failed`** — the server dropped requests, usually a timeout under load. Lower
   `--num-workers`, raise `--timeout`, or pass `--best-effort` to keep the page.
+- **401 from the server** — it is authenticated and your client is not. Export `OCR_API_KEY`
+  (read by `HttpRecognizer` and `OCRClient`), or send `Authorization: Bearer <token>`.
 - **Slower per page than the offline path** — expected with `--enforce-eager`. Drop it and pay
   the compile cost once at startup.

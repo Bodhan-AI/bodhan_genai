@@ -23,17 +23,45 @@ import os
 #: The published checkpoint. Public on the Hub, so it resolves without credentials.
 DEFAULT_HF_REPO = "bodhan-ai/indic-transcribe-core"
 
-#: Repo-level override, mirroring BODHAN_OCR_HF_REPO on the OCR side.
+#: Repo-level override, mirroring BODHAN_OCR_HF_REPO on the OCR side. Honoured ONLY inside a
+#: deployment image -- see :func:`_in_deployment_image`.
 HF_REPO_ENV = "BODHAN_ASR_HF_REPO"
+
+#: Set by docker/*/Dockerfile*, and nowhere else. Its presence means "weights are bundled or
+#: mounted into this image, and the environment is how they are addressed".
+DEPLOYMENT_ENV = "BODHAN_GENAI_DEPLOYMENT"
+
+
+def _in_deployment_image() -> bool:
+    """True only inside one of this repo's deployment images.
+
+    Checkpoint paths must not move because of an inherited environment variable. A stale
+    ``BODHAN_ASR_HF_REPO`` in someone's shell silently loading different weights is a
+    correctness bug that looks like a model regression, so outside a deployment image the
+    environment is not consulted at all: the explicit argument decides, or the default does.
+
+    Deliberately duplicated in ``bodhan_genai.ocr.engine.checkpoints``: ``bodhan_genai`` is a
+    bare PEP 420 namespace with no shared module, and no modality imports another.
+    """
+    return os.environ.get(DEPLOYMENT_ENV) == "1"
 
 
 def resolve_ckpt(explicit: str | None = None) -> str:
-    """Pick the checkpoint identifier: explicit -> environment -> the published default.
+    """Pick the checkpoint identifier: explicit -> the published default.
 
     Returns a directory path or a Hub repo id, whichever was selected — it does not download,
     and does not check existence. Loaders resolve individual files through :func:`resolve_file`.
+
+    The environment is consulted **only** inside a deployment image. Everywhere else the same
+    arguments always resolve to the same weights.
     """
-    return explicit or os.environ.get(HF_REPO_ENV) or DEFAULT_HF_REPO
+    if explicit:
+        return explicit
+    if _in_deployment_image():
+        from_env = os.environ.get(HF_REPO_ENV)
+        if from_env:
+            return from_env
+    return DEFAULT_HF_REPO
 
 
 def resolve_file(repo_or_dir: str, filename: str, **kwargs) -> str:

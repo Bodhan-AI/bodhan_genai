@@ -35,9 +35,25 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-# The weights sit in a weights/ocr subfolder, which `vllm serve` cannot address, so
-# resolve to a local path with the package's own resolver. That honours an explicit
-# CHECKPOINT, then BODHAN_OCR_RECOGNIZER_CKPT, then a bundled weights/, then the Hub.
+# Optional bearer-token auth, off by default. Stock `vllm serve` enforces a token itself, so
+# there is nothing to write or maintain here: set OCR_API_KEY=$(openssl rand -hex 32) and clients
+# send it the way every OpenAI SDK already does (api_key=...), which MTClient/OCRClient accept.
+#
+# Unset means OPEN, and this binds 0.0.0.0. On a shared network put a TLS reverse proxy in
+# front, or bind to localhost and tunnel.
+
+# CHECKPOINT from the environment is honoured ONLY inside a deployment image, where it is how
+# mounted weights under /models are addressed. Outside one an inherited CHECKPOINT silently
+# serving different weights is a correctness bug that presents as a model regression, so it is
+# ignored; pass --model to vllm serve, or set CHECKPOINT for one command inside the image.
+if [ "${BODHAN_GENAI_DEPLOYMENT:-}" != "1" ]; then
+    unset CHECKPOINT
+fi
+
+# The weights sit in a weights/ocr subfolder, which `vllm serve` cannot address, so resolve to a
+# local path with the package's own resolver. Outside a deployment image that honours an explicit
+# CHECKPOINT then the published default; inside one it also consults
+# BODHAN_OCR_RECOGNIZER_CKPT and a bundled weights/.
 if [[ -z "${CHECKPOINT:-}" ]]; then
     CHECKPOINT="$(python -c \
         'from bodhan_genai.ocr.engine.checkpoints import resolve_ckpt; print(resolve_ckpt("recognizer"))' \
@@ -62,7 +78,9 @@ ENFORCE_EAGER="${ENFORCE_EAGER:-0}"
 LOG_FILE="${LOG_FILE:-vllm-serve.log}"
 # Written once the server is up, as shell-sourceable `PID=`/`PORT=` lines. The port
 # matters because we may have moved off a squatted one.
-INFO_FILE="${INFO_FILE:-vllm-serve.info}"
+# Per-modality, not a shared "vllm-serve.info": running two servers on one box
+# otherwise has the second clobber the first's PID and port.
+INFO_FILE="${INFO_FILE:-ocr-serve.info}"
 
 FOREGROUND=0
 EXTRA=()
@@ -136,6 +154,12 @@ SERVE_ARGS=(
     --port "${PORT}"
 )
 [[ "${ENFORCE_EAGER}" == "1" ]] && SERVE_ARGS+=(--enforce-eager)
+# Handed over in the ENVIRONMENT, not as --api-key on the command line: a process's
+# argv is world-readable (`ps -eo args` from any account on the node), so the flag
+# would publish the token to every user on a shared box. /proc/<pid>/environ is
+# 0400 owner-only. vLLM reads VLLM_API_KEY and enforces it identically; --api-key
+# merely takes precedence when both are set.
+[[ -n "${OCR_API_KEY:-}" ]] && export VLLM_API_KEY="${OCR_API_KEY}"
 [[ ${#EXTRA[@]} -gt 0 ]] && SERVE_ARGS+=("${EXTRA[@]}")
 
 if [[ "${FOREGROUND}" -eq 1 ]]; then

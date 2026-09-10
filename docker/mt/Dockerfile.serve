@@ -18,12 +18,15 @@
 # index URLs together — they are one decision, not four.
 FROM nvidia/cuda:12.9.1-base-ubuntu24.04
 
+# build-essential: Triton compiles a CUDA driver shim at engine startup and needs a host C
+# compiler. Without it the image builds cleanly and then dies at first request with
+# "Failed to find C compiler".
 # ca-certificates: all three wheel indexes and the Hub are https.
 # iproute2: serve.sh probes for a free port with `ss`. Without it the probe answers
 # "free" for everything, and a squatted port then fails at bind — after the 15.9 GB
 # load. Only reachable under --network host; a fresh container netns squats nothing.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates iproute2 \
+ && apt-get install -y --no-install-recommends ca-certificates iproute2 build-essential \
  && rm -rf /var/lib/apt/lists/*
 
 # uv 0.11+: 0.6 cannot fetch the CPython the .python-version pins, so the venv step fails.
@@ -75,13 +78,25 @@ RUN uv pip install ".[mt-serve]" \
 
 # --- runtime -----------------------------------------------------------------
 # Weights (15.9 GB) are NOT baked in: mount them under /models (see serve_docker.sh)
-# or let serve.sh pull its default hub id. That default,
-# bodhan-ai/indic-translate, is a PRIVATE repo, and the `hf auth login`
-# half of serve.sh's credentials advice is useless in a container — HF_TOKEN is the
-# only route in, and without it the pull 401s minutes after a healthy-looking start.
+# or let serve.sh pull its default hub id, bodhan-ai/indic-translate, which is public and
+# needs no credentials. For a gated or private checkpoint, note that the `hf auth login`
+# half of serve.sh's credentials advice is useless in a container — HF_TOKEN is the only
+# route in, and without it the pull 401s minutes after a healthy-looking start.
 # HF_HOME points into /models so a hub download can be mounted through and survive
 # `docker run --rm`, instead of being paid again per container.
 # PYTHONUNBUFFERED because the foreground log below is the only progress signal.
+# flashinfer-cubin: in vLLM's own requirements/cuda.txt but NOT on PyPI, so the vLLM install
+# above silently omits it. Without it flashinfer JIT-compiles kernels at engine warm-up and
+# needs nvcc, which this image does not carry; with it ~16k kernels arrive prebuilt. It does
+# not cover the sampling module -- serve.sh disables that sampler for exactly that reason.
+RUN FI=$(python -c 'import importlib.metadata as m; print(m.version("flashinfer-python"))') \
+ && uv pip install "flashinfer-cubin==${FI}" --extra-index-url https://flashinfer.ai/whl/
+
+# Marks this as a deployment image. The checkpoint resolvers and the serve scripts consult
+# the environment for weight locations ONLY when this is set, so an inherited variable on
+# a developer machine can never redirect which weights load.
+ENV BODHAN_GENAI_DEPLOYMENT=1
+
 ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/models/hf-cache
 

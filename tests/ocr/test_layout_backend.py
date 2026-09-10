@@ -145,6 +145,7 @@ def test_close_is_idempotent():
 def test_explicit_path_wins_over_everything(monkeypatch):
     from bodhan_genai.ocr.engine.checkpoints import resolve_ckpt
 
+    monkeypatch.setenv("BODHAN_GENAI_DEPLOYMENT", "1")
     monkeypatch.setenv("BODHAN_OCR_LAYOUT_CKPT", "/nonexistent")
     assert resolve_ckpt("layout", explicit="/my/ckpt") == "/my/ckpt"
 
@@ -152,6 +153,7 @@ def test_explicit_path_wins_over_everything(monkeypatch):
 def test_env_override_is_used_when_it_points_at_a_directory(monkeypatch, tmp_path):
     from bodhan_genai.ocr.engine.checkpoints import resolve_ckpt
 
+    monkeypatch.setenv("BODHAN_GENAI_DEPLOYMENT", "1")
     monkeypatch.setenv("BODHAN_OCR_RECOGNIZER_CKPT", str(tmp_path))
     assert resolve_ckpt("recognizer") == str(tmp_path)
 
@@ -159,6 +161,7 @@ def test_env_override_is_used_when_it_points_at_a_directory(monkeypatch, tmp_pat
 def test_env_override_pointing_nowhere_fails_loudly(monkeypatch):
     from bodhan_genai.ocr.engine.checkpoints import resolve_ckpt
 
+    monkeypatch.setenv("BODHAN_GENAI_DEPLOYMENT", "1")
     monkeypatch.setenv("BODHAN_OCR_LAYOUT_CKPT", "/definitely/not/here")
     with pytest.raises(FileNotFoundError):
         resolve_ckpt("layout")

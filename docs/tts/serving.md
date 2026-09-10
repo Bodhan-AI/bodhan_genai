@@ -62,7 +62,7 @@ async for pcm in engine.stream("Hello world", speaker="S1"):
 | `windower` | `StreamingWindower` — incremental DELTA tokens → fixed-frame windows (pure numpy) |
 | `snac_streamer` | `InProcessSnacDecoder` + `SnacMicroBatcher` (ordered, fixed-batch CUDA-graph decode) |
 | `replica` | `TtsReplica` — AsyncLLM + SNAC co-located; `synthesize` async-gen of PCM frames |
-| `service` | `TtsService(TtsReplica)` — merged deployment: FastAPI `WS /tts`, `WS /tts/chunked`, `POST /tts/offline`, `GET /health` in the replica process; optional background WAV recorder pool |
+| `service` | `TtsService(TtsReplica)` — merged deployment: FastAPI `WS /tts`, `WS /tts/chunked`, `POST /tts/sse`, `POST /tts/offline`, `GET /health` in the replica process; optional background WAV recorder pool |
 | `app` | builds + runs the Serve app (entry point of `python -m bodhan_genai.tts.serving.app`) |
 
 ## Run
@@ -76,6 +76,7 @@ CHECKPOINT=/path/to/checkpoint scripts/tts/serve.sh
 | env var | default | meaning |
 |---|---|---|
 | `CHECKPOINT` | `bodhan-ai/indic-speak` | model checkpoint path or HF id; the default is a public Hub id, so no credentials are needed |
+| `TTS_AUTH_FILE` | unset (server is **open**) | opt in to HTTP Basic: a `chmod 600` `user:password` file; see [Authentication](#authentication) |
 | `PORT` | 8000 | websocket port |
 | `NUM_REPLICAS` | auto (GPU count) | replicas, one per GPU |
 | `RAY_ADDRESS` | `local` | must stay `local` — single-node, in-process Ray |
@@ -89,6 +90,7 @@ Server base: `<node>:8000` (endpoints below). Then:
 ```bash
 python examples/tts/streaming_client.py --mode stream  --text "..." --out out.wav   # WS /tts
 python examples/tts/streaming_client.py --mode chunked --text "..." --out out.wav   # WS /tts/chunked
+python examples/tts/streaming_client.py --mode sse     --text "..." --out out.wav   # POST /tts/sse
 python examples/tts/streaming_client.py --mode offline --text "..." --out out.wav   # POST /tts/offline
 ```
 
@@ -114,12 +116,13 @@ The model is **speaker-conditioned** — pass a real `speaker`; an empty speaker
 
 ## Endpoints
 
-One server, one engine per GPU replica, three synthesis endpoints:
+One server, one engine per GPU replica, four synthesis endpoints:
 
 | endpoint | transport | behavior |
 |---|---|---|
 | `/tts` | websocket | live streaming; per-request `"chunked": true` still honored |
 | `/tts/chunked` | websocket | long-form chunked streaming (chunked routing forced) |
+| `/tts/sse` | HTTP POST | the same live stream as `/tts`, as Server-Sent Events with base64 audio |
 | `/tts/offline` | HTTP POST | complete utterance: JSON request in → `audio/wav` bytes out |
 | `/health` | HTTP GET | readiness probe |
 
@@ -134,6 +137,92 @@ curl -s -X POST http://<node>:8000/tts/offline \
 
 The bundled client drives all three: `python -m bodhan_genai.tts.serving.client
 --mode {stream,chunked,offline} --text "..." --out out.wav`.
+
+## Authentication
+
+**Off by default.** This is a reference server meant to be copied and extended, so it starts
+with no arguments at all. Opting in is one variable — every route except `GET /health` then sits
+behind HTTP Basic, using the same implementation IndicTranscribe uses
+(`bodhan_genai._serving_auth`), because access control copied into two modalities is access
+control fixed in one of them.
+
+```bash
+umask 077 && printf 'alice:%s\n' "$(openssl rand -hex 32)" > ~/.indicspeak-creds
+TTS_AUTH_FILE=~/.indicspeak-creds scripts/tts/serve.sh
+```
+
+Keep that file **outside the repo**: only the path travels through Ray's `runtime_env`, so the
+credential is never committed and never lands in a worker's environment. A file that is missing
+or is not `user:password` is a hard error rather than a fallback to open — that case is somebody
+enabling auth and mistyping.
+
+Clients pass it the ordinary way:
+
+```bash
+curl -u alice:$TOKEN -X POST http://<node>:8000/tts/offline ...
+python -m bodhan_genai.tts.serving.client --mode sse --auth alice:$TOKEN --text "..."
+```
+
+```python
+# websocket: userinfo in the URL, or an Authorization header
+websockets.connect("ws://alice:<token>@<node>:8000/tts")
+```
+
+The middleware is raw ASGI rather than a FastAPI dependency for one reason: `BaseHTTPMiddleware`
+only sees `http` scopes, so `WS /tts` and `WS /tts/chunked` would sail straight past it.
+
+An unauthenticated websocket is refused **at the handshake**, which means the client does not see
+a 401: the middleware closes with code 1008 before accepting, and Ray Serve's proxy surfaces that
+to the client as **HTTP 403** (verified against a running server — `websockets` raises
+`InvalidStatus: server rejected WebSocket connection: HTTP 403`). A 403 on a websocket connect is
+therefore a missing or wrong credential, not a routing problem.
+
+`/health` is exempt so the launcher and any orchestrator can poll readiness; a liveness probe
+cannot carry credentials, and it discloses liveness only.
+
+!!! warning "What the default costs you"
+    The server binds `0.0.0.0`, so out of the box anyone who can reach the node can drive its
+    GPUs. Turning Basic auth on is not sufficient on its own either: base64 is not encryption,
+    so on plain HTTP the credential is readable in flight, and there is one shared credential
+    with no rotation or rate limiting. For a real deployment put a TLS reverse proxy in front,
+    or bind to localhost and tunnel — this server is the reference you extend, not the finished
+    perimeter.
+
+## HTTP streaming (SSE)
+
+`POST /tts/sse` is `WS /tts` for callers that cannot hold a websocket open — a browser
+`EventSource`, an HTTP/2 client, anything behind a proxy that terminates upgrades. Same request
+body as `/tts/offline`, same control frames as the websocket (they come from the same functions,
+so the two transports cannot describe a stream differently).
+
+```bash
+curl -N -u alice:$TOKEN -X POST http://<node>:8000/tts/sse \
+  -H 'content-type: application/json' \
+  -d '{"text": "नमस्ते दुनिया", "speaker": "Amit"}'
+```
+
+```
+event: start
+data: {"event": "start", "sample_rate": 24000, "encoding": "pcm_s16le"}
+
+event: audio
+data: {"event": "audio", "seq": 0, "pcm_b64": "..."}
+
+event: end
+data: {"event": "end", "audio_dur_s": 1.234, "n_frames": 15}
+```
+
+`pcm_b64` decodes to raw little-endian int16 PCM @ 24 kHz — the same bytes the websocket sends
+as binary. SSE is a text protocol, so **audio costs 33% more on the wire here**; that is the
+price of not needing a websocket, and the reason `/tts` remains the default. `seq` is dense and
+ordered, and it is the only way a client can notice a dropped frame.
+
+A failure mid-stream arrives as an `error` event, **not** an HTTP status: the response is
+committed 200 the moment the first event ships. Partial audio delivered before the failure is
+still valid audio. Do not treat 200 as success — read to the `end` event.
+
+`-N` on curl, and no buffering proxy in front: the response carries `X-Accel-Buffering: no`
+because nginx otherwise buffers it into a slow offline endpoint with no error anywhere.
 
 ## Websocket protocol
 

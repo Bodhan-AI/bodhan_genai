@@ -61,6 +61,18 @@ RUN uv pip install -e ".[all-ocr]" \
 # HOME and USER are set because the container runs as the caller's uid (see
 # parse_docker.sh), which has no passwd entry: torch reads USER, and both torch and
 # Triton write caches under HOME.
+# flashinfer-cubin: in vLLM's own requirements/cuda.txt but NOT on PyPI, so the vLLM install
+# above silently omits it. Without it flashinfer JIT-compiles kernels at engine warm-up and
+# needs nvcc, which this image does not carry; with it ~16k kernels arrive prebuilt. It does
+# not cover the sampling module -- serve.sh disables that sampler for exactly that reason.
+RUN FI=$(python -c 'import importlib.metadata as m; print(m.version("flashinfer-python"))') \
+ && uv pip install "flashinfer-cubin==${FI}" --extra-index-url https://flashinfer.ai/whl/
+
+# Marks this as a deployment image. The checkpoint resolvers and the serve scripts consult
+# the environment for weight locations ONLY when this is set, so an inherited variable on
+# a developer machine can never redirect which weights load.
+ENV BODHAN_GENAI_DEPLOYMENT=1
+
 ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/models/hf-cache \
     FLASHINFER_WORKSPACE_BASE=/models/flashinfer \

@@ -29,8 +29,8 @@ bodhan_genai/
 ├── configs/{tts,mt,ocr}/        data / train / accelerate / infer YAMLs
 ├── scripts/{tts,mt,ocr,asr}/    *.sh launchers (train, infer, serve, eval, render, merge)
 ├── docker/{tts,mt,ocr}/         Dockerfile.serve, and Dockerfile.parse for OCR
-├── notebooks/{tts,mt,ocr,asr}/  inference.ipynb, training.ipynb walkthroughs
-├── examples/{tts,mt,ocr,asr}/   runnable single-file examples
+├── notebooks/{tts,mt,ocr,asr}/  inference.ipynb, training.ipynb walkthroughs (+ README)
+├── examples/{tts,mt,ocr,asr}/   runnable single-file examples (+ README)
 ├── docs/{tts,mt,ocr,asr}/       per-modality reference docs
 └── tests/{tts,mt,ocr,asr}/      CPU-only pytest suite
 ```
@@ -67,6 +67,72 @@ HF_HOME=/big/disk python scripts/e2e_public_models.py
 Needs network and pulls ~30 GB. It takes the transformers path so it runs without a GPU, which
 means it does *not* exercise the vLLM backends — treat green as "weights load and the plumbing
 is connected", not as a parity or performance check.
+
+## Serving conventions
+
+All four launchers (`scripts/{tts,mt,ocr,asr}/serve.sh`) share one contract. Add to it in all
+four, or not at all — the bugs found here were all "one modality has it, the others don't".
+
+| every launcher must | why |
+|---|---|
+| search for a free port near `PORT` | shared clusters squat ports; Ray reports a collision as a bind error buried in a worker-node log |
+| write `PID` / `PORT` to a per-modality `INFO_FILE` | with a port search, the caller cannot otherwise tell where the server landed. Never a shared filename — two servers on one box would clobber each other |
+| announce the resolved port on stdout | |
+| **start with no arguments** | these launchers are a reference setup to copy and extend. Anything a server cannot run without — a credential, a token — belongs behind an opt-in, not in front of `--help` |
+| ignore checkpoint env vars unless `BODHAN_GENAI_DEPLOYMENT=1` | an inherited `CHECKPOINT` / `MODEL_DIR` silently serving different weights is a correctness bug that presents as a model regression. The marker is set only by `docker/*/Dockerfile*` |
+
+Two differences are by design, not oversight:
+
+- **Ray Serve (`tts`, `asr`) runs in the foreground**, so it cannot gate on readiness after
+  launching — poll `/health`. **Stock `vllm serve` (`mt`, `ocr`) backgrounds itself** and gates
+  on `/v1/models` advertising its own `SERVED_NAME`, because a bare 200 on a shared box could be
+  someone else's server.
+- **`VLLM_USE_FLASHINFER_SAMPLER=0`, `VLLM_USE_DEEP_GEMM=0` and the venv on `PATH` are set only
+  by `mt` and `ocr`.** Those two launch stock `vllm serve`, which never imports our engine
+  modules and so never gets their `os.environ.setdefault`. TTS goes through our engine; ASR uses
+  no vLLM at all.
+
+### Authentication
+
+**Off by default, in all four.** These launchers are a minimal reference setup: the documented
+main path is offline inference, and a server you can start with no arguments is the point. Auth
+is one environment variable away when a deployment needs it, and extending it is the caller's
+job, not ours.
+
+| launcher | opt in with | mechanism |
+|---|---|---|
+| `tts`, `asr` | `TTS_AUTH_FILE` / `ASR_AUTH_FILE` → a `chmod 600` `user:password` file | HTTP Basic, `bodhan_genai._serving_auth` |
+| `mt`, `ocr` | `MT_API_KEY` / `OCR_API_KEY` | bearer token, vLLM's native auth |
+
+The Ray Serve deployments share a single implementation on purpose: access control copied into
+two modalities is access control fixed in one of them. It is raw ASGI rather than a FastAPI
+dependency because `BaseHTTPMiddleware` only sees `http` scopes, so a streaming websocket would
+sail straight past it. `GET /health` is exempt — an orchestrator's liveness probe cannot carry
+credentials.
+
+`mt` and `ocr` run stock `vllm serve`, which enforces bearer tokens itself. Putting our
+middleware in front of that would be a second auth layer guarding one that already works, so
+they hand the token over as `VLLM_API_KEY` in the environment — **not** `--api-key` on the
+command line, whose argv any account on the node can read with `ps -eo args`. `MTClient` and
+OCR's `HttpRecognizer` read their variable from the environment.
+
+Two things stay strict, because both mean somebody is *enabling* auth and getting it wrong:
+an unreadable credential file and a malformed one are errors, never a silent fallback to open.
+
+!!! warning "What this is not"
+    Every launcher binds `0.0.0.0`, so the default is reachable by anyone on the network. Basic
+    auth is also only as private as its transport: base64 is not encryption, so over plain HTTP
+    the credential is readable in flight. There is one shared credential per service, no
+    per-user identity, no rotation and no rate limiting. That is deliberate for a reference
+    setup — for a real deployment, put a TLS reverse proxy in front, or bind to localhost and
+    tunnel.
+
+!!! note "Testing auth: assert it is *attached*, not merely configured"
+    Both suites once stayed green with `add_middleware` deleted — the tests either asserted the
+    installer raised or exercised a middleware they constructed themselves, so none of them
+    noticed the endpoints were wide open. Any new auth test must drive a request through the real
+    stack (`TestClient`) and assert a 401. Neuter the installer and watch it fail before you
+    trust it.
 
 ## Before pushing
 

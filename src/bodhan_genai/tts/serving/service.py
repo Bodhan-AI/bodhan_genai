@@ -9,6 +9,9 @@ One server, three synthesis endpoints sharing ONE engine:
 
   WS   /tts          — live streaming (per-request ``chunked`` flag honored)
   WS   /tts/chunked  — long-form chunked streaming (chunked routing forced)
+  POST /tts/sse      — the same live stream over plain HTTP (Server-Sent
+                       Events, base64 audio) for callers that cannot hold a
+                       websocket open
   POST /tts/offline  — complete utterance: JSON SynthesisRequest -> audio/wav
                        (server-side accumulation of the same stream; the
                        ``chunked`` flag selects long-form accumulation)
@@ -25,10 +28,18 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, Response, WebSocket
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
+from bodhan_genai._serving_auth import install_basic_auth as _install_basic_auth_shared
 from bodhan_genai.tts.inference.audio_io import SNAC_SAMPLE_RATE, pcm16_to_wav_bytes
-from bodhan_genai.tts.serving.protocol import SynthesisRequest, end_frame, error_frame, start_frame
+from bodhan_genai.tts.serving.protocol import (
+    SynthesisRequest,
+    audio_frame,
+    end_frame,
+    error_frame,
+    sse,
+    start_frame,
+)
 from bodhan_genai.tts.serving.replica import TtsReplica
 
 logger = logging.getLogger("serving.service")
@@ -102,6 +113,39 @@ async def _ws_synthesis(service, ws: WebSocket, force_chunked: bool | None) -> N
         _submit_recording(service, b"".join(chunks))
 
 
+async def _sse_synthesis(service, req: dict):
+    """The websocket stream, re-framed as Server-Sent Events.
+
+    Module-level and generator-shaped for the same reason as ``_ws_synthesis``:
+    tests drive it with a fake service and no Ray Serve. It reuses the same
+    control-frame builders, so the two transports cannot drift apart.
+
+    A failure after the first event is an ``error`` event, never a status --
+    ``StreamingResponse`` commits 200 as soon as anything ships. Nothing is
+    re-raised: a raised exception mid-body just severs the connection, which
+    tells the client only that something ended.
+    """
+    record = service._writer is not None
+    chunks: list[bytes] = []
+    total_samples = 0
+    yield sse("start", start_frame())
+    try:
+        seq = 0
+        async for frame in service.synthesize(req):
+            yield sse("audio", audio_frame(seq, frame))
+            seq += 1
+            total_samples += len(frame) // 2
+            if record:
+                chunks.append(frame)
+    except Exception as e:
+        logger.error("[TtsService] sse synthesis failed: %s", e)
+        yield sse("error", error_frame(str(e)))
+        return
+    yield sse("end", end_frame(total_samples / SNAC_SAMPLE_RATE, total_samples // 2048))
+    if chunks:
+        _submit_recording(service, b"".join(chunks))
+
+
 async def _offline_synthesis(service, req: dict) -> tuple[bytes, int]:
     """Drain the (possibly chunked) synthesis stream into one PCM buffer.
     Exceptions propagate to the route, which maps them to a JSON 500."""
@@ -137,6 +181,20 @@ class TtsService(TtsReplica):
     async def tts_chunked(self, ws: WebSocket):
         await _ws_synthesis(self, ws, force_chunked=True)
 
+    @fastapi_app.post("/tts/sse")
+    async def tts_sse(self, request: SynthesisRequest):
+        return StreamingResponse(
+            _sse_synthesis(self, request.model_dump()),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                # nginx and friends buffer a proxied response by default, which turns a
+                # streaming endpoint into a slow offline one with no error anywhere.
+                "X-Accel-Buffering": "no",
+                "X-Sample-Rate": str(SNAC_SAMPLE_RATE),
+            },
+        )
+
     @fastapi_app.post("/tts/offline")
     async def tts_offline(self, request: SynthesisRequest):
         req = request.model_dump()
@@ -158,6 +216,16 @@ class TtsService(TtsReplica):
         )
 
 
+def _install_basic_auth(app) -> None:
+    """Install HTTP Basic auth if TTS_AUTH_FILE is set; open otherwise.
+
+    The websocket endpoints are the reason this is raw-ASGI middleware rather than a FastAPI
+    dependency: a BaseHTTPMiddleware subclass only sees ``http`` scopes, so ``WS /tts`` would
+    sail straight past it.
+    """
+    _install_basic_auth_shared(app, prefix="TTS", realm="IndicSpeak")
+
+
 def build_deployment():
     """Apply the Ray Serve decorators lazily.
 
@@ -165,7 +233,12 @@ def build_deployment():
     keeping it out of module scope lets tests and tooling import this module
     (handlers, FastAPI app, TtsService class) instantly and CPU-only. The
     FastAPI routes are already registered on ``fastapi_app`` at class-body
-    evaluation — Serve only needs to wrap the class for ingress dispatch."""
+    evaluation — Serve only needs to wrap the class for ingress dispatch.
+
+    Auth is installed here and NOT at module scope: importing this module must stay free, or
+    every reader of it breaks for a check that only matters when something is served. It fails
+    closed — see :func:`bodhan_genai._serving_auth.install_basic_auth`."""
     from ray import serve
 
+    _install_basic_auth(fastapi_app)
     return serve.deployment(serve.ingress(fastapi_app)(TtsService))

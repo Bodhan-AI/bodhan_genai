@@ -33,10 +33,12 @@ Serving needs one extra: `pip install -e ".[asr-serve]"`.
 Nothing to do if you want the published checkpoint: everything below resolves
 `bodhan-ai/indic-transcribe-core` by default, which is public — no credentials needed.
 
-To use your own instead — a local directory or another repo id:
+To use your own instead, pass it explicitly. Checkpoint environment variables are
+ignored outside a deployment image, on purpose: an inherited `MODEL_DIR` silently
+transcribing with different weights is a correctness bug that looks like a model regression.
 
 ```bash
-export MODEL_DIR=/path/to/indic-transcribe-hf     # or BODHAN_ASR_HF_REPO=org/repo
+python -m bodhan_genai.asr.inference.transcribe --model-dir /path/to/indic-transcribe-hf ...
 ```
 
 All three loaders — model, tokenizer and feature extractor — accept either form. The model class

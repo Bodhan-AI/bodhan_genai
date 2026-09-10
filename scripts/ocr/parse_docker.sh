@@ -13,7 +13,8 @@
 #   LAYOUT_CKPT      host dir of an IndicDocLayout checkpoint (mounted read-only)
 #   RECOGNIZER_CKPT  host dir of an IndicBlockOCR checkpoint (mounted read-only)
 #                    Either one unset, that stage resolves from the Hub
-#   HF_TOKEN         hub credentials, needed for the default repo
+#   HF_TOKEN         hub credentials. Not needed for the default (bodhan-ai/indic-ocr is
+#                    public); required for a gated or private checkpoint
 #   BODHAN_OCR_HF_REPO  resolve weights from a different Hub repo
 #   HF_CACHE_DIR     host dir for the hub cache; keeps the download across runs
 #   FLASHINFER_DIR   host dir for the JIT cache; keeps compiled kernels across runs

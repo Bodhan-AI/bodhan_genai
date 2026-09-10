@@ -441,7 +441,6 @@ def test_importing_the_service_module_needs_no_auth_env(monkeypatch):
     import sys
 
     monkeypatch.delenv("ASR_AUTH_FILE", raising=False)
-    monkeypatch.delenv("ASR_AUTH_ALLOW_OPEN", raising=False)
     # a subprocess, because the module is already in sys.modules for this session
     result = subprocess.run(
         [sys.executable, "-c", "import bodhan_genai.asr.serving.service"],
@@ -451,30 +450,69 @@ def test_importing_the_service_module_needs_no_auth_env(monkeypatch):
     assert result.returncode == 0, result.stderr
 
 
-def test_build_deployment_still_fails_closed_without_a_credential(monkeypatch):
-    """Moving the check must not have moved it out of the way."""
-    from bodhan_genai.asr.serving.service import build_deployment
+def test_auth_is_optional_so_a_server_starts_with_no_environment(monkeypatch):
+    """The default is an open server.
 
-    monkeypatch.delenv("ASR_AUTH_FILE", raising=False)
-    monkeypatch.delenv("ASR_AUTH_ALLOW_OPEN", raising=False)
-    with pytest.raises(RuntimeError, match="ASR_AUTH_FILE"):
-        build_deployment(object())
-
-
-def test_auth_refuses_to_install_itself_silently_open(monkeypatch):
-    """Unset used to mean 'serve everything unauthenticated', announced by one
-    warning in Ray's startup spam."""
+    This is a reference setup meant to be copied and extended; needing an environment variable
+    to start one made the first thing a new user saw an error about a credential file.
+    """
     from fastapi import FastAPI
 
     from bodhan_genai.asr.serving.service import _install_basic_auth
 
     monkeypatch.delenv("ASR_AUTH_FILE", raising=False)
-    monkeypatch.delenv("ASR_AUTH_ALLOW_OPEN", raising=False)
-    with pytest.raises(RuntimeError, match="ASR_AUTH_FILE"):
+    app = FastAPI()
+    _install_basic_auth(app)
+    assert not any("BasicAuth" in str(m) for m in app.user_middleware)
+
+
+def test_a_broken_credential_file_is_still_fatal(monkeypatch, tmp_path):
+    """Opt-in, but not opt-in-and-quietly-fail.
+
+    An unreadable or malformed file is someone *enabling* auth and getting it wrong; serving
+    open in that case is the one outcome nobody wants, so it stays an error.
+    """
+    from fastapi import FastAPI
+
+    from bodhan_genai.asr.serving.service import _install_basic_auth
+
+    monkeypatch.setenv("ASR_AUTH_FILE", str(tmp_path / "missing"))
+    with pytest.raises(RuntimeError, match="unreadable"):
         _install_basic_auth(FastAPI())
 
-    monkeypatch.setenv("ASR_AUTH_ALLOW_OPEN", "1")
-    _install_basic_auth(FastAPI())  # explicit opt-out is allowed
+    bad = tmp_path / "creds"
+    bad.write_text("no-colon-here")
+    monkeypatch.setenv("ASR_AUTH_FILE", str(bad))
+    with pytest.raises(RuntimeError, match="not 'user:password'"):
+        _install_basic_auth(FastAPI())
+
+
+def test_auth_is_actually_attached_and_not_merely_configured(monkeypatch, tmp_path):
+    """Drive a real request through the stack.
+
+    Every other auth test here either asserts the installer *raises* or exercises the
+    middleware it constructs itself, so all of them stayed green with the installer's
+    add_middleware call removed -- i.e. with the endpoints wide open. This one notices.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from bodhan_genai.asr.serving.service import _install_basic_auth
+
+    creds = tmp_path / "creds"
+    creds.write_text("alice:s3cret\n")
+    monkeypatch.setenv("ASR_AUTH_FILE", str(creds))
+
+    app = FastAPI()
+    _install_basic_auth(app)
+    client = TestClient(app)
+
+    refused = client.get("/asr/stats")
+    assert refused.status_code == 401
+    assert refused.headers["www-authenticate"] == 'Basic realm="Indic Transcribe"'
+
+    # 404, not 401: no such route on a bare app, which is the point -- it got past auth.
+    assert client.get("/asr/stats", auth=("alice", "s3cret")).status_code == 404
 
 
 def test_auth_compares_bytes_so_a_non_ascii_header_is_401_not_500():

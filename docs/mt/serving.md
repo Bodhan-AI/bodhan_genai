@@ -50,7 +50,37 @@ Extra flags pass through to `vllm serve`.
 | `GPU_MEMORY_UTILIZATION` | `0.90` | |
 | `TENSOR_PARALLEL_SIZE` | `1` | |
 | `VLLM_BIN` | from `$PATH` | point at another env's vllm |
+| `MT_API_KEY` | unset (server is **open**) | opt in: bearer token the server then demands; see [Authentication](#authentication) |
 | `LOG_FILE` / `INFO_FILE` | `vllm-serve.{log,info}` | |
+
+### Authentication
+
+**Off by default** — a reference server starts with no arguments. Stock `vllm serve` enforces a
+bearer token itself, so opting in needs nothing from us:
+
+```bash
+export MT_API_KEY=$(openssl rand -hex 32)
+scripts/mt/serve.sh
+```
+
+The launcher hands it to vLLM as `VLLM_API_KEY` in the environment, **not** `--api-key` on the
+command line: a process's argv is readable by any account on the node (`ps -eo args`), so the
+flag would publish the token to every user on a shared box.
+
+Clients send it the way every OpenAI SDK already does. `MTClient` reads `MT_API_KEY` from the
+environment, so exporting the same value you launched with is enough:
+
+```bash
+export MT_API_KEY=<token>                       # picked up by the client
+curl -H "Authorization: Bearer <token>" http://localhost:8000/v1/models
+```
+
+An open server ignores the header, so leaving the variable exported is harmless.
+
+!!! warning "The open default binds `0.0.0.0`"
+    Anyone who can reach the node can use the GPU behind it. A bearer token over plain HTTP is
+    also readable in flight. Put a TLS reverse proxy in front, or bind to localhost and tunnel,
+    for anything past a trusted network.
 
 ### Why each flag is there
 
@@ -180,7 +210,9 @@ Weights are 15.9 GB in bf16.
 - **`Resolved architecture` error / unknown `gemma4`** — `transformers < 5.12`.
 - **Server never becomes ready** — first pull is 15.9 GB. `tail -f vllm-serve.log`. The wrapper
   gives up after 30 minutes and prints the last 40 lines.
-- **401/403 on the published checkpoint** — it is private. `hf auth login` or export `HF_TOKEN`.
+- **401 from the server** — it is authenticated and your client is not. Export `MT_API_KEY`, or
+  send `Authorization: Bearer <token>`. (The published checkpoint is public, so a 401 during
+  *download* means a gated fork or a private finetune — `hf auth login` for those.)
 - **Fluent but poor translations** — check the prompt, not the model. Almost always a hand-built
   payload that names the source language or adds a system turn. See
   [prompt_contract.md](prompt_contract.md).

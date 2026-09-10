@@ -89,9 +89,9 @@ Four of these carry costs worth knowing before you touch them:
 
 | var | default | what it does |
 |---|---|---|
-| `MODEL_DIR` | *(unset)* | Local directory **or** Hub repo id. Unset resolves `bodhan-ai/indic-transcribe-core`. Read by both `infer.sh` and `serve.sh`. |
+| `MODEL_DIR` | *(unset)* | Local directory **or** Hub repo id. **Honoured only inside a deployment image**; outside one the launchers unset it and use the default — pass `--model-dir` / `--model_dir` instead. |
 | `NUM_SHARDS` | `1` | One process per shard. |
-| `BODHAN_ASR_HF_REPO` | *(unset)* | Override the default repo without editing configs. |
+| `BODHAN_ASR_HF_REPO` | *(unset)* | Override the default repo. **Honoured only inside a deployment image** (`BODHAN_GENAI_DEPLOYMENT=1`, set by `docker/*/Dockerfile*`); ignored elsewhere so a stale shell variable cannot redirect weights. |
 | `INDIC_TRANSCRIBE_PROFILE` | unset | Set to `1` for phase timers that add up. |
 
 !!! warning "Budget 4–8 CPU cores per GPU"

@@ -75,10 +75,25 @@ otherwise fails by silently ignoring a setting you thought you had changed.
 Resolution order, first hit wins:
 
 1. an explicit path (constructor argument or `--layout-ckpt` / `--ocr-ckpt`);
-2. `BODHAN_OCR_LAYOUT_CKPT` / `BODHAN_OCR_RECOGNIZER_CKPT` — a path that does not exist raises,
-   rather than silently falling through to a 1.7 GB download;
-3. `weights/{layout,ocr}/` bundled beside the repository;
-4. download from the private HF repo (`BODHAN_OCR_HF_REPO` overrides), which needs credentials on
-   first use.
+2. the public `bodhan-ai/indic-ocr` repo, downloaded per stage.
+
+Three further routes exist, and **all three apply only inside a deployment image** — that is,
+when `BODHAN_GENAI_DEPLOYMENT=1`, which only `docker/*/Dockerfile*` sets. Between step 1 and
+step 2 there, in order:
+
+- `BODHAN_OCR_LAYOUT_CKPT` / `BODHAN_OCR_RECOGNIZER_CKPT` — how `parse_docker.sh` addresses
+  weights mounted at `/models`. A path that does not exist raises, rather than silently falling
+  through to a 1.7 GB download;
+- `weights/{layout,ocr}/` bundled beside the repository;
+- `BODHAN_OCR_HF_REPO`, replacing the default repo id.
+
+!!! warning "Why they are gated"
+
+    Both are *implicit* — nobody typed them at the call site. An inherited
+    `BODHAN_OCR_LAYOUT_CKPT`, or a `weights/` directory left behind by an earlier experiment,
+    silently loads different weights on every subsequent run. That is a correctness bug which
+    presents as a model regression, and it is invisible: no flag, no log line, no diff. Inside
+    the image they are the mechanism for mounted weights, so they are kept there and nowhere
+    else. Everywhere else, the same arguments always load the same weights.
 
 Nothing is downloaded until a stage is constructed, so import and `--help` never touch the network.

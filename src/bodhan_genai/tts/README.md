@@ -43,10 +43,11 @@ flowchart LR
   adapter-only checkpoints and `torch.compile` hard-disabled to avoid recompile storms.
 - **Two-phase vLLM batch inference** — generate audio tokens for a whole manifest with vLLM
   workers, then batch-decode SNAC to WAVs (`scripts/tts/infer.sh`).
-- **Ray Serve server, three endpoints on one engine** — one replica = one GPU = vLLM AsyncLLM +
+- **Ray Serve server, four endpoints on one engine** — one replica = one GPU = vLLM AsyncLLM +
   in-process compiled SNAC decoder + micro-batcher (`scripts/tts/serve.sh`): `WS /tts` (live
-  int16-PCM streaming), `WS /tts/chunked` (long-form chunked streaming), `POST /tts/offline`
-  (complete `audio/wav` response).
+  int16-PCM streaming), `WS /tts/chunked` (long-form chunked streaming), `POST /tts/sse` (the
+  same live stream over plain HTTP) and `POST /tts/offline` (complete `audio/wav` response).
+  Optional HTTP Basic auth on every route except `GET /health`.
 - **Multi-turn conversation templates** — `<|speaker>S1<speaker|>` conversation sequences built by
   `bodhan_genai.tts.templates`, rendered by all inference paths, including streaming.
 - **Release qualification** — deterministic deployment gates before promoting a build. See
@@ -320,14 +321,19 @@ scripts/tts/serve.sh   # CHECKPOINT=/path/to/checkpoint overrides the bodhan-ai/
 python examples/tts/streaming_client.py --text "Hello from the streaming server." --out stream.wav
 ```
 
-One server exposes three endpoints: `WS /tts` (live streaming), `WS /tts/chunked` (long-form
-chunked streaming), and `POST /tts/offline` (complete `audio/wav`) — the client selects with
-`--mode {stream,chunked,offline}`, or plain curl for offline:
+One server exposes four endpoints: `WS /tts` (live streaming), `WS /tts/chunked` (long-form
+chunked streaming), `POST /tts/sse` (live streaming over plain HTTP) and `POST /tts/offline`
+(complete `audio/wav`) — the client selects with `--mode {stream,chunked,sse,offline}`, or plain
+curl:
 
 ```bash
-curl -s -X POST localhost:8000/tts/offline -H 'content-type: application/json' \
+curl -s -u alice:$TOKEN -X POST localhost:8000/tts/offline -H 'content-type: application/json' \
   -d '{"text": "Hello world", "speaker": "Amit"}' -o out.wav
 ```
+
+The server is **open by default** — it starts with no arguments. Set `TTS_AUTH_FILE` to a
+`user:password` file to require HTTP Basic auth; the client then takes `--auth user:password` or
+reads the same file. See [serving](../../../docs/tts/serving.md#authentication).
 
 Or one-shot offline synthesis without a server:
 

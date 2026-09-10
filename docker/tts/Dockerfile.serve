@@ -14,8 +14,12 @@
 
 FROM nvidia/cuda:12.9.1-base-ubuntu24.04
 
+# build-essential is required, not incidental: Triton compiles a CUDA driver shim at
+# engine startup and needs a host C compiler. Without it the image builds cleanly and
+# then dies at first request with "Failed to find C compiler" -- see docker/ocr, which
+# learned this first.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates build-essential \
  && rm -rf /var/lib/apt/lists/*
 
 # uv 0.11+: 0.6 cannot fetch the CPython the .python-version pins, so the venv step fails.
@@ -58,6 +62,18 @@ RUN uv pip install ".[tts-serve]" \
 # --- runtime -----------------------------------------------------------------
 # Model weights are NOT baked in: mount them under /models (see serve_docker.sh)
 # or pass an HF id + HF_TOKEN. HF_HOME keeps any hub downloads on the mount.
+# flashinfer-cubin: in vLLM's own requirements/cuda.txt but NOT on PyPI, so the vLLM install
+# above silently omits it. Without it flashinfer JIT-compiles kernels at engine warm-up and
+# needs nvcc, which this image does not carry; with it ~16k kernels arrive prebuilt. It does
+# not cover the sampling module -- the engine disables that sampler for exactly that reason.
+RUN FI=$(python -c 'import importlib.metadata as m; print(m.version("flashinfer-python"))') \
+ && uv pip install "flashinfer-cubin==${FI}" --extra-index-url https://flashinfer.ai/whl/
+
+# Marks this as a deployment image. The checkpoint resolvers and the serve scripts consult
+# the environment for weight locations ONLY when this is set, so an inherited variable on
+# a developer machine can never redirect which weights load.
+ENV BODHAN_GENAI_DEPLOYMENT=1
+
 ENV RAY_ADDRESS=local \
     VLLM_ENABLE_V1_MULTIPROCESSING=0 \
     PYTHONUNBUFFERED=1 \

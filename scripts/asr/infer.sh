@@ -16,7 +16,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-# Empty is fine: the CLI resolves the published default (asr.engine.checkpoints).
+# MODEL_DIR from the environment is honoured ONLY inside a deployment image, where it is how
+# mounted weights under /models are addressed. Outside one, an inherited MODEL_DIR silently
+# transcribing with different weights is a correctness bug that presents as a model regression.
+# Pass --model-dir instead: "$@" is forwarded and argparse takes the later occurrence.
+if [ "${BODHAN_GENAI_DEPLOYMENT:-}" != "1" ]; then
+    unset MODEL_DIR
+fi
+# Empty is fine: the CLI resolves the published default (asr.checkpoints).
 MODEL_DIR="${MODEL_DIR:-}"
 NUM_SHARDS="${NUM_SHARDS:-1}"
 

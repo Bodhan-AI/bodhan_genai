@@ -39,7 +39,7 @@ with the frozen audio-token layout — see [token layout](token_layout.md).
 - [Token layout](token_layout.md) — the frozen SNAC token contract and 7-token frame interleave
 - [Data pipeline](data_pipeline.md) — stage 1 tokenize, stage 2 compile
 - [Inference](inference.md) — entry points, default models, the Vocos/SNAC decoder knob
-- [Serving](serving.md) — the Ray Serve streaming server and its three endpoints
+- [Serving](serving.md) — the Ray Serve streaming server, its four endpoints and its auth gate
 - [Configs](configs.md) — field-by-field config reference
 - [Release qualification](release.md) — deployment gates
 - [API reference](../reference/tts.md) — classes and functions

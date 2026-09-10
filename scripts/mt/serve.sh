@@ -23,6 +23,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
+# Optional bearer-token auth, off by default. Stock `vllm serve` enforces a token itself, so
+# there is nothing to write or maintain here: set MT_API_KEY=$(openssl rand -hex 32) and clients
+# send it the way every OpenAI SDK already does (api_key=...), which MTClient/OCRClient accept.
+#
+# Unset means OPEN, and this binds 0.0.0.0. On a shared network put a TLS reverse proxy in
+# front, or bind to localhost and tunnel.
+
+# Checkpoint paths from the environment are honoured ONLY inside a deployment image, where
+# they are how mounted weights under /models are addressed. Outside one, an inherited CHECKPOINT
+# silently serving different weights is a correctness bug that presents as a model regression,
+# so it is ignored and the published default is used. To point this at your own checkpoint
+# locally, pass the flag -- "$@" is forwarded last and argparse takes the later occurrence:
+#   ./scripts/mt/serve.sh --model /path/to/ckpt
+if [ "${BODHAN_GENAI_DEPLOYMENT:-}" != "1" ]; then
+    unset CHECKPOINT
+fi
 MODEL="${CHECKPOINT:-bodhan-ai/indic-translate}"
 SERVED_NAME="${SERVED_NAME:-indic_translate}"
 GPU="${GPU:-0}"
@@ -34,7 +50,9 @@ LOG_FILE="${LOG_FILE:-vllm-serve.log}"
 # Written once the server is up, as shell-sourceable `PID=`/`PORT=` lines. The
 # port matters because we may have had to move off a squatted one, so callers
 # cannot assume $PORT held.
-INFO_FILE="${INFO_FILE:-vllm-serve.info}"
+# Per-modality, not a shared "vllm-serve.info": running two servers on one box
+# otherwise has the second clobber the first's PID and port.
+INFO_FILE="${INFO_FILE:-mt-serve.info}"
 
 FOREGROUND=0
 EXTRA=()
@@ -76,6 +94,15 @@ if port_in_use "${PORT}"; then
     echo "Using port ${PORT}."
 fi
 
+# The same three runtime settings scripts/ocr/serve.sh applies, and for the same reason.
+# This path is stock `vllm serve`, so it never imports bodhan_genai.mt.engine.offline and
+# never gets that module's os.environ.setdefault -- the guard has to live here instead.
+# Without the sampler flag, flashinfer JIT-compiles its sampling kernel at engine warm-up
+# and the build shells out to ninja, which lives in the venv's bin/ and is otherwise not
+# resolvable from the engine subprocess: `ninja ... returned non-zero exit status 127`,
+# surfacing as "Engine core initialization failed" after a healthy-looking start.
+export PATH="$(dirname "$(command -v python)"):${PATH}"
+export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 export VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-${GPU}}"
 
@@ -100,6 +127,12 @@ SERVE_ARGS=(
     --enforce-eager
     --port "${PORT}"
 )
+# Handed over in the ENVIRONMENT, not as --api-key on the command line: a process's
+# argv is world-readable (`ps -eo args` from any account on the node), so the flag
+# would publish the token to every user on a shared box. /proc/<pid>/environ is
+# 0400 owner-only. vLLM reads VLLM_API_KEY and enforces it identically; --api-key
+# merely takes precedence when both are set.
+[[ -n "${MT_API_KEY:-}" ]] && export VLLM_API_KEY="${MT_API_KEY}"
 [[ ${#EXTRA[@]} -gt 0 ]] && SERVE_ARGS+=("${EXTRA[@]}")
 
 if [[ "${FOREGROUND}" -eq 1 ]]; then

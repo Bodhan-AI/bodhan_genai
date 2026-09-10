@@ -1,21 +1,26 @@
-"""The three serving endpoints, driven through the shared handlers with a fake
+"""The four serving endpoints, driven through the shared handlers with a fake
 service — real FastAPI routing/framing, no Ray Serve, no GPU, no vllm."""
 
 from __future__ import annotations
 
 import io
 import json
+from base64 import b64decode
 from typing import ClassVar
 
 import numpy as np
 import pytest
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.testclient import TestClient
 
 from bodhan_genai.tts.inference.audio_io import SNAC_SAMPLE_RATE, pcm16_to_wav_bytes
 from bodhan_genai.tts.serving.protocol import SynthesisRequest
-from bodhan_genai.tts.serving.service import _offline_synthesis, _ws_synthesis
+from bodhan_genai.tts.serving.service import (
+    _offline_synthesis,
+    _sse_synthesis,
+    _ws_synthesis,
+)
 
 FRAME = (np.arange(2048, dtype=np.int16) * 7 % 3000).astype(np.int16).tobytes()
 N_FRAMES = 3
@@ -55,6 +60,12 @@ def make_app(svc: FakeService) -> FastAPI:
     async def tts_chunked(ws: WebSocket):
         await _ws_synthesis(svc, ws, force_chunked=True)
 
+    @app.post("/tts/sse")
+    async def tts_sse(request: SynthesisRequest):
+        return StreamingResponse(
+            _sse_synthesis(svc, request.model_dump()), media_type="text/event-stream"
+        )
+
     @app.post("/tts/offline")
     async def tts_offline(request: SynthesisRequest):
         req = request.model_dump()
@@ -69,6 +80,28 @@ def make_app(svc: FakeService) -> FastAPI:
         )
 
     return app
+
+
+def drain_sse(resp) -> tuple[list[dict], list[bytes]]:
+    """Parse an SSE body into control events and decoded PCM frames.
+
+    Deliberately checks the ``event:`` line against the ``"event"`` key inside
+    the JSON: the two are written separately, and a mismatch would break an
+    EventSource listener while every data-only reader stayed happy.
+    """
+    controls, frames = [], []
+    event = None
+    for line in resp.text.splitlines():
+        if line.startswith("event:"):
+            event = line[6:].strip()
+        elif line.startswith("data:"):
+            msg = json.loads(line[5:].strip())
+            assert msg["event"] == event, f"event line {event!r} != data {msg['event']!r}"
+            if msg["event"] == "audio":
+                frames.append(b64decode(msg["pcm_b64"]))
+            else:
+                controls.append(msg)
+    return controls, frames
 
 
 def drain_ws(ws) -> tuple[list[dict], list[bytes]]:
@@ -190,7 +223,7 @@ def test_pcm16_wav_roundtrip():
 
 
 class TestDialogueRequests:
-    """`messages` dialogue requests over all three endpoints."""
+    """`messages` dialogue requests over the websocket and offline endpoints."""
 
     TURNS: ClassVar[list[dict]] = [{"speaker": "a", "text": "hi"}, {"speaker": "b", "text": "yo"}]
 
@@ -241,3 +274,105 @@ class TestDialogueRequests:
         client = TestClient(make_app(FakeService()))
         resp = client.post("/tts/offline", json={"text": "hi", "messages": self.TURNS})
         assert resp.status_code == 422
+
+
+class TestSseEndpoint:
+    """POST /tts/sse — the websocket stream over plain HTTP."""
+
+    def test_frames_arrive_base64_between_start_and_end(self):
+        svc = FakeService()
+        resp = TestClient(make_app(svc)).post("/tts/sse", json={"text": "hi", "speaker": "Amit"})
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        controls, frames = drain_sse(resp)
+        assert [c["event"] for c in controls] == ["start", "end"]
+        assert frames == [FRAME] * N_FRAMES
+        assert controls[-1]["n_frames"] == N_FRAMES
+        assert svc.seen_req["speaker"] == "Amit"
+        assert svc.seen_req["chunked"] is None  # server default decides, as on /tts
+
+    def test_it_reports_the_same_stream_the_websocket_does(self):
+        """One request, both transports: the control frames must agree.
+
+        They share the frame builders precisely so this holds; the test is here
+        because sharing them is easy to undo by inlining one 'small' dict.
+        """
+        payload = {"text": "hi", "speaker": "Amit"}
+        client = TestClient(make_app(FakeService()))
+        sse_controls, sse_frames = drain_sse(client.post("/tts/sse", json=payload))
+        with client.websocket_connect("/tts") as ws:
+            ws.send_text(json.dumps(payload))
+            ws_controls, ws_frames = drain_ws(ws)
+        assert sse_controls == ws_controls
+        assert sse_frames == ws_frames
+
+    def test_sequence_numbers_are_dense_and_ordered(self):
+        """SSE has no framing of its own past the event boundary, so a client
+        reassembling audio has only ``seq`` to detect a dropped frame."""
+        resp = TestClient(make_app(FakeService())).post("/tts/sse", json={"text": "hi"})
+        seqs = [
+            json.loads(line[5:])["seq"]
+            for line in resp.text.splitlines()
+            if line.startswith("data:") and '"audio"' in line
+        ]
+        assert seqs == list(range(N_FRAMES))
+
+    def test_midstream_failure_is_an_error_event_not_a_status(self):
+        """The response is committed 200 at the first event, so a 500 is not
+        available -- and a bare exception would just sever the connection."""
+        resp = TestClient(make_app(FakeService(fail_after=1))).post("/tts/sse", json={"text": "hi"})
+        assert resp.status_code == 200
+        controls, frames = drain_sse(resp)
+        assert [c["event"] for c in controls] == ["start", "error"]
+        assert "scripted synthesis failure" in controls[-1]["detail"]
+        assert len(frames) == 1  # partial audio delivered before the failure
+
+    def test_invalid_body_is_422(self):
+        client = TestClient(make_app(FakeService()))
+        assert client.post("/tts/sse", json={"speaker": "no text"}).status_code == 422
+        both = {"text": "hi", "messages": [{"speaker": "a", "text": "hi"}]}
+        assert client.post("/tts/sse", json=both).status_code == 422
+
+    def test_dialogue_passes_through(self):
+        svc = FakeService()
+        turns = [{"speaker": "a", "text": "hi"}, {"speaker": "b", "text": "yo"}]
+        _controls, frames = drain_sse(
+            TestClient(make_app(svc)).post("/tts/sse", json={"messages": turns})
+        )
+        assert svc.seen_req["messages"] == turns
+        assert frames == [FRAME] * N_FRAMES
+
+
+def test_sse_is_incremental_not_buffered():
+    """The point of the endpoint is time-to-first-audio.
+
+    TestClient hands back a complete body, so no test above can tell a stream
+    from a buffered join. Drive the generator directly instead: ``start`` must
+    arrive before synthesis has produced anything, and each frame as it comes.
+    """
+    import asyncio
+
+    produced: list[str] = []
+
+    class SlowService:
+        _writer = None
+
+        def synthesize(self, req):
+            async def gen():
+                for _ in range(N_FRAMES):
+                    produced.append("frame")
+                    yield FRAME
+
+            return gen()
+
+    async def drive():
+        seen = []
+        async for chunk in _sse_synthesis(SlowService(), {"text": "hi"}):
+            seen.append((len(produced), chunk.split(b"\n")[0]))
+        return seen
+
+    seen = asyncio.run(drive())
+    # start ships with nothing synthesised yet; frame N ships after exactly N frames exist
+    assert seen[0] == (0, b"event: start")
+    assert [n for n, _ in seen[1 : 1 + N_FRAMES]] == list(range(1, N_FRAMES + 1))
+    assert seen[-1][1] == b"event: end"

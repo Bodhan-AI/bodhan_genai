@@ -18,6 +18,7 @@ import pytest
 
 from bodhan_genai.asr.checkpoints import (
     DEFAULT_HF_REPO,
+    DEPLOYMENT_ENV,
     HF_REPO_ENV,
     resolve_ckpt,
     resolve_file,
@@ -31,14 +32,34 @@ def test_the_default_repo_is_the_published_one():
 # --- resolve_ckpt: identifier selection, no I/O ------------------------------------------------
 
 
-def test_explicit_wins_over_environment_and_default(monkeypatch):
+def test_explicit_wins_over_everything(monkeypatch):
+    monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
     monkeypatch.setenv(HF_REPO_ENV, "someone-else/other-repo")
     assert resolve_ckpt("/some/path") == "/some/path"
 
 
-def test_environment_wins_over_the_default(monkeypatch):
+def test_the_environment_is_ignored_outside_a_deployment_image(monkeypatch):
+    """The point of the whole mechanism: an inherited variable cannot redirect weights.
+
+    A stale BODHAN_ASR_HF_REPO in a shell silently transcribing with a different checkpoint is a
+    correctness bug that presents as a model regression, so it is not consulted at all here.
+    """
+    monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
+    monkeypatch.setenv(HF_REPO_ENV, "someone-else/other-repo")
+    assert resolve_ckpt() == DEFAULT_HF_REPO
+
+
+def test_the_environment_is_honoured_inside_a_deployment_image(monkeypatch):
+    """Inside the image it is how mounted weights are addressed, so it must still work."""
+    monkeypatch.setenv(DEPLOYMENT_ENV, "1")
     monkeypatch.setenv(HF_REPO_ENV, "someone-else/other-repo")
     assert resolve_ckpt() == "someone-else/other-repo"
+
+
+def test_an_explicit_argument_beats_the_environment_even_in_an_image(monkeypatch):
+    monkeypatch.setenv(DEPLOYMENT_ENV, "1")
+    monkeypatch.setenv(HF_REPO_ENV, "someone-else/other-repo")
+    assert resolve_ckpt("/some/path") == "/some/path"
 
 
 def test_the_default_is_used_when_nothing_else_is_set(monkeypatch):

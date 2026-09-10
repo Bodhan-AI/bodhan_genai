@@ -170,7 +170,8 @@ A rendered site — including a generated API reference — is built from `docs/
 | learn the frozen SNAC token layout | [docs/tts/token_layout.md](docs/tts/token_layout.md) |
 | trust an ASR WER or LID number | [docs/asr/caveats.md](docs/asr/caveats.md) |
 | look up a config field | [TTS](docs/tts/configs.md) · [MT](docs/mt/configs.md) · [OCR](docs/ocr/configs.md) · [ASR](docs/asr/configs.md) |
-| run a notebook walkthrough | [tts](notebooks/tts/) · [mt](notebooks/mt/) · [ocr](notebooks/ocr/) · [asr](notebooks/asr/) |
+| run a notebook walkthrough | [notebooks/](notebooks/README.md) |
+| copy a short runnable snippet | [examples/](examples/README.md) |
 | qualify a TTS release | [docs/tts/release.md](docs/tts/release.md) |
 | contribute, or find your way around the tree | [CONTRIBUTING.md](CONTRIBUTING.md) |
 

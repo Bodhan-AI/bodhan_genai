@@ -10,8 +10,9 @@
 #   CHECKPOINT_DIR   host dir of a merged checkpoint (mounted read-only)
 #   CHECKPOINT       *alternative to CHECKPOINT_DIR: an HF hub id (needs network).
 #                    Unset, serve.sh falls back to bodhan-ai/indic-translate
-#   HF_TOKEN         hub credentials. Not optional for that default — it is a PRIVATE
-#                    repo, and `hf auth login` is not available inside the container
+#   HF_TOKEN         hub credentials. Not needed for the default (bodhan-ai/indic-translate
+#                    is public); required for a gated or private checkpoint, since
+#                    `hf auth login` is not available inside the container
 #   HF_CACHE_DIR     host dir for the hub cache (mounted rw). Without it the 15.9 GB
 #                    pull lands in the container layer and --rm discards it
 #   PORT             host port to expose (default 8000)

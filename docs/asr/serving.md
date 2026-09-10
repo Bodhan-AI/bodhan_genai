@@ -157,11 +157,24 @@ decoded whole, because chunking short audio measurably hurts
 
 ### Authentication
 
-Every route except `GET /health` sits behind HTTP Basic auth. Point
-`ASR_AUTH_FILE` at a `chmod 600` file containing `user:password` — outside the
-repo, so the credential is never committed and never travels through Ray's
-`runtime_env`; only the path does. Starting without it is a hard error;
-`ASR_AUTH_ALLOW_OPEN=1` disables auth explicitly for localhost runs.
+**Off by default** — a reference server starts with no arguments. Point
+`ASR_AUTH_FILE` at a `chmod 600` file containing `user:password` and every
+route except `GET /health` then sits behind HTTP Basic auth:
+
+```bash
+umask 077 && printf 'alice:%s\n' "$(openssl rand -hex 32)" > ~/.asr-creds
+ASR_AUTH_FILE=~/.asr-creds scripts/asr/serve.sh
+```
+
+Keep that file outside the repo, so the credential is never committed and
+never travels through Ray's `runtime_env`; only the path does. A file that is
+missing or is not `user:password` is a hard error rather than a fallback to
+open — that case is somebody enabling auth and mistyping.
+
+The default binds `0.0.0.0`, so anyone who can reach the node can use its
+GPUs; and Basic auth over plain HTTP is readable in flight. Put a TLS reverse
+proxy in front, or bind to localhost and tunnel, for anything past a trusted
+network.
 
 `/health` is exempt so the launcher and tunnel can poll readiness. It discloses
 liveness only, and it returns 503 — not 200 — when the replica's slot scheduler

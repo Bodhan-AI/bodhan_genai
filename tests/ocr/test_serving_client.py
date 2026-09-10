@@ -166,7 +166,8 @@ def test_prompt_parity_against_the_shipped_template():
     """The real check: the served prompt must equal the offline one on the actual checkpoint.
 
     Skips without weights, so CI does not need them. Run it wherever a checkpoint exists:
-        BODHAN_OCR_RECOGNIZER_CKPT=/path/to/weights/ocr pytest tests/ocr/test_serving_client.py
+        BODHAN_GENAI_DEPLOYMENT=1 BODHAN_OCR_RECOGNIZER_CKPT=/path/to/weights/ocr \
+        pytest tests/ocr/test_serving_client.py
     """
     import os
     from pathlib import Path
@@ -175,7 +176,10 @@ def test_prompt_parity_against_the_shipped_template():
 
     ckpt = os.environ.get("BODHAN_OCR_RECOGNIZER_CKPT")
     if not ckpt:
-        pytest.skip("set BODHAN_OCR_RECOGNIZER_CKPT to check against the shipped chat template")
+        pytest.skip(
+            "set BODHAN_OCR_RECOGNIZER_CKPT (and BODHAN_GENAI_DEPLOYMENT=1, which gates it) "
+            "to check against the shipped chat template"
+        )
     path = Path(ckpt) / "chat_template.jinja"
     if not path.is_file():
         pytest.skip(f"no chat_template.jinja under {ckpt}")

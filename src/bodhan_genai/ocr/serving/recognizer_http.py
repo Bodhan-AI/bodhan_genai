@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
@@ -68,7 +69,7 @@ class HttpRecognizer:
         base_url: str,
         *,
         model: str = DEFAULT_MODEL,
-        api_key: str = "EMPTY",
+        api_key: str = "",
         timeout: float = 300.0,
         config: RecognizerConfig | None = None,
         num_workers: int = 32,
@@ -84,7 +85,11 @@ class HttpRecognizer:
         else:
             from openai import OpenAI
 
-            self._client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout)
+            # vLLM ignores the key when the server was started without --api-key, so the
+            # "EMPTY" placeholder stays valid for an open server. When OCR_API_KEY is exported
+            # the client picks it up, instead of every caller having to wire it through.
+            key = api_key or os.environ.get("OCR_API_KEY") or "EMPTY"
+            self._client = OpenAI(base_url=base_url, api_key=key, timeout=timeout)
 
     def _one(self, request: CropRequest) -> str:
         response = self._client.chat.completions.create(

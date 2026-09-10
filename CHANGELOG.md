@@ -7,6 +7,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08
+
+### Changed — the public namespace (BREAKING)
+
+- **`Bodhan*` becomes `Indic*` across the public API, and the four models get their release
+  names.** Every import that named the company now names the family instead:
+
+  | before | after |
+  |---|---|
+  | `BodhanTTSEngine` | `IndicTTSEngine` |
+  | `BodhanMTEngine` | `IndicMTEngine` |
+  | `BodhanASREngine` | `IndicASREngine` |
+  | `IndicCanaryEngine` | `IndicTranscribeEngine` |
+  | `IndicDocParser` | `IndicOCR` |
+
+  The models are **IndicSpeak** (TTS), **IndicTranslate** (MT), **IndicOCR** and
+  **IndicTranscribe** (ASR); the model layer, configs, CLIs, scripts, docs and served names follow
+  (`indic_translate`, `indic_ocr`). No aliases: the OCR back-compat shims added days earlier are
+  removed rather than doubled, because two spellings of one engine is how a codebase ends up with
+  both forever. `scripts/rename_gate.sh` enforces it in both directions — no stale name outside a
+  small allowlist, and every allowlisted file still carries the one it is allowlisted for, so a
+  sweep cannot quietly turn a deliberate legacy literal into a tautology.
+- **A published checkpoint still loads.** `bodhan-ai/indic-transcribe-core`'s `config.json` says
+  `model_type: indic_canary` with an `auto_map` pointing at the old module names, so
+  `IndicTranscribeConfig.from_pretrained` accepts the legacy `model_type` and rewrites it. Only
+  that one value: a genuinely different `model_type` still delegates to the base class rather than
+  being laundered into ours.
+- **Citation key** `indicdocparser2026` → `indicocr2026`.
+
+### Changed — defaults point at the published models
+
+- **Every engine now resolves its checkpoint from the public `bodhan-ai/` Hub repos with no
+  argument at all** — `indic-speak`, `indic-translate`, `indic-transcribe-core`, and OCR's two
+  stages. Previously the defaults were local paths that existed on one filesystem. `IndicMTEngine`
+  loses its positional `model` requirement, so all four engines construct bare.
+- **IndicSpeak decodes through the fine-tuned Vocos decoder by default**, shipped in the same
+  repo as the LM. The SNAC decoder remains selectable.
+- **ASR's tokenizer and feature extractor resolve Hub ids too**, through
+  `transformers.utils.cached_file` like everything else, instead of requiring a local directory
+  beside the weights.
+- **Checkpoint paths from the environment are honoured only inside a deployment image.**
+  `BODHAN_ASR_HF_REPO`, `BODHAN_OCR_*_CKPT`, `CHECKPOINT`, `MODEL_DIR` and a bundled `weights/`
+  directory are consulted **only** when `BODHAN_GENAI_DEPLOYMENT=1`, which nothing but
+  `docker/*/Dockerfile*` sets. An inherited variable silently serving different weights is a
+  correctness bug that presents as a model regression, and local inference has no reason to accept
+  one; pass an explicit path or flag instead.
+
+### Added — one serving contract for all four launchers
+
+- **Optional authentication on every server, off by default.** `scripts/asr/serve.sh` used to
+  refuse to start without an auth decision and the other three had no authentication at all.
+  Both halves of that are gone: these launchers are a minimal reference setup to copy and
+  extend, the documented main path is offline inference, and a server you can start with no
+  arguments is the point. Opting in is one variable:
+
+  | launcher | opt in with | mechanism |
+  |---|---|---|
+  | `tts`, `asr` | `TTS_AUTH_FILE` / `ASR_AUTH_FILE` → a `chmod 600` `user:password` file | HTTP Basic |
+  | `mt`, `ocr` | `MT_API_KEY` / `OCR_API_KEY` | bearer token, vLLM's own |
+
+  Two mechanisms because there are two kinds of server, not two opinions: the Ray Serve
+  deployments share one implementation (`bodhan_genai._serving_auth` — raw ASGI, since
+  `BaseHTTPMiddleware` never sees a websocket scope, and `compare_digest` on bytes so a
+  non-ASCII header is a 401 rather than a 500 that discloses the middleware), while `mt` and
+  `ocr` run stock `vllm serve`, which already enforces bearer tokens. A credential file that is
+  missing or malformed stays fatal — that case is somebody enabling auth and mistyping, and
+  serving open then is the one outcome nobody wants. `GET /health` is always exempt.
+
+  Every launcher binds `0.0.0.0` and the default is open, which the serving docs and
+  `docs/troubleshooting.md` now say plainly, along with what Basic auth does not give you: no
+  transport security (base64 is not encryption), one shared credential, no rotation, no rate
+  limiting. Reference setup, not a finished perimeter.
+- **The vLLM token is handed over in the environment, not on the command line.** `mt` and `ocr`
+  passed `--api-key "$MT_API_KEY"` to `vllm serve`, and a process's argv is readable by any
+  account on the node (`ps -eo args`), so the flag published the token to every user on a shared
+  box. They export `VLLM_API_KEY` instead, which vLLM enforces identically — verified live: 401
+  with no header, 401 with a wrong token, 200 with the right one, and the token absent from the
+  server's argv.
+- **`POST /tts/sse` — the live IndicSpeak stream over plain HTTP.** `WS /tts` is the fastest
+  transport and stays the default, but a websocket is not always available: a browser
+  `EventSource`, an HTTP/2 client, or anything behind a proxy that terminates upgrades could
+  previously only fall back to `/tts/offline` and wait for the whole utterance. The SSE endpoint
+  carries the same sequence, built by the same control-frame functions so the two transports
+  cannot drift, with audio base64-encoded inside the event data — 33% more on the wire, which is
+  the price of not needing a websocket. A mid-stream failure is an `error` event rather than a
+  status, since the response is committed 200 at the first event. `--mode sse` on the bundled
+  client, which also gained `--auth user:password` (it had no way to authenticate at all, which
+  became a problem the moment the launcher started requiring it).
+  Verified against a running server on an H100 with a credential file configured:
+  `/health` still answers 200 without one, both POST routes return 401 with the `IndicSpeak`
+  realm when a credential file is configured, an unauthenticated websocket connect is rejected
+  **HTTP 403** (the pre-handshake close is what a client sees, not 1008 — the docs said
+  otherwise), and `--mode sse` reached first-audio in 102 ms against the websocket's 118 ms.
+- **A free-port search, a per-modality `INFO_FILE`, and the resolved port on stdout, in all
+  four.** `mt` had them; `tts` and `asr` bound blindly, and Ray reports a collision as a bind
+  error buried in a deduplicated controller log on a worker node. Never a shared filename — two
+  servers on one box would clobber each other's.
+- `scripts/e2e_public_models.py` — a ten-stage smoke test over the real published weights, outside
+  pytest because it needs network and ~30 GB. The CPU suite never proves a checkpoint loads.
+- `scripts/make_public_snapshot.sh` — builds the publishable tree from `git archive` and **fails**,
+  rather than warns, if an internal path, a credential or a pre-rename name survives.
+
+### Added — documentation
+
+- **The root README is a front door.** Modality detail moved into the four package READMEs, which
+  now share one shape; the shared failure modes moved to `docs/troubleshooting.md`, which is new.
+- **Every ASCII diagram is now Mermaid**, rendered on the site through
+  `pymdownx.superfences` custom fences and natively on GitHub.
+- New pages: `docs/asr/{index,configs,end-to-end}.md`, `docs/tts/{end-to-end,training,eval}.md`,
+  and READMEs for `examples/` and `notebooks/`. Per-modality gaps are filled to one standard:
+  every stack documents its end-to-end path, its configs and its serving contract.
+- Planning documents (`docs/superpowers/`) are excluded from the built site and from the public
+  snapshot; they are working notes, not documentation.
+
+### Verified — the rename, and the released weights
+
+- **All four models, on the pinned environment, against the released weights** — 10/10 stages of
+  `scripts/e2e_public_models.py` on an H100: ASR transcription, LID and the continuous-batching
+  engine; OCR layout, the transformers recognizer, the vLLM recognizer and both stages together;
+  IndicSpeak through vLLM + Vocos; IndicTranslate into three scripts. Plus the TTS and ASR servers
+  end to end and all three Docker images built and serving.
+- **Two documented claims were wrong and are corrected.** The `bodhan-ai/` repos are **public**
+  (released 2026-09-05); 25 places said private or gated. And IndicOCR's vLLM recognizer needs no
+  CUDA toolkit — the "Could not find nvcc" it used to produce was an out-of-date `flashinfer`, not
+  a missing compiler. `install.sh` now installs a version-matched `flashinfer-cubin`.
+- **Docker: the TTS and MT images built and then died at the first request.** Both lacked
+  `build-essential`, which triton needs to compile a CUDA driver shim at engine startup, and
+  `mt/serve.sh` was missing two of the three vLLM guards `ocr` had. Fixed and re-verified by
+  serving from each container.
+- **Auth is tested by driving a request through the real middleware stack.** Both suites once
+  stayed green with `add_middleware` removed — every test either asserted the installer *raises*
+  or exercised a middleware it constructed itself, so none noticed the endpoints were wide open.
+
 ### Added
 
 - **`bodhan_genai.ocr` — the OCR modality (IndicOCR).** Block-level document parsing for

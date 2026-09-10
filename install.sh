@@ -54,6 +54,12 @@ TORCH_VERSION="2.11.0"
 VLLM_VERSION="${VLLM_VERSION:-0.26.0}"
 CU_INDEX="https://download.pytorch.org/whl/${CUDA_TAG}"
 VLLM_INDEX="https://wheels.vllm.ai/${VLLM_VERSION}/${CUDA_TAG}"
+# flashinfer-cubin is in vLLM 0.26's own requirements/cuda.txt but is NOT published to PyPI, so
+# a plain `pip install vllm` silently omits it. Without it flashinfer JIT-compiles kernels at
+# engine warm-up, which needs nvcc; with it, ~16k kernels arrive prebuilt (attention, gemm,
+# fmha, deep-gemm). It does NOT cover the *sampling* module -- that still JIT-builds, which is
+# why every engine here also sets VLLM_USE_FLASHINFER_SAMPLER=0.
+FLASHINFER_INDEX="https://flashinfer.ai/whl/"
 
 EXTRAS="all"
 MODE="gpu"
@@ -148,6 +154,14 @@ case "$MODE" in
     # --index-url (not --extra-index-url) restricts this to the per-CUDA index, whose
     # torchaudio/torchvision are built against exactly that torch.
     $PIP install torchaudio torchvision --index-url "$CU_INDEX"
+    # Prebuilt flashinfer kernels, version-matched to the flashinfer-python vLLM already pulled.
+    # Non-fatal: a miss costs JIT compiles at engine warm-up, not correctness.
+    FI_VERSION="$(python -c 'import importlib.metadata as m; print(m.version("flashinfer-python"))' 2>/dev/null || true)"
+    if [ -n "${FI_VERSION}" ]; then
+      $PIP install "flashinfer-cubin==${FI_VERSION}" --extra-index-url "$FLASHINFER_INDEX" \
+        "${UV_INDEX_FLAGS[@]}" \
+        || echo "WARNING: flashinfer-cubin ${FI_VERSION} unavailable; kernels will JIT-compile (needs nvcc)." >&2
+    fi
     # Keep vLLM's transformers pin if it already clears the PPDocLayoutV3 floor OCR needs.
     python -c 'import transformers,sys; v=tuple(int(x) for x in transformers.__version__.split(".")[:2]); sys.exit(0 if v>=(5,7) else 1)' 2>/dev/null \
       || $PIP install "transformers>=5.7" "${UV_INDEX_FLAGS[@]}"

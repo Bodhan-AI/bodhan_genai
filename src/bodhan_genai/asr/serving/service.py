@@ -22,12 +22,10 @@ lazy so importing this module does not drag Ray in.
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import json
 import logging
 import os
-import secrets
 import tempfile
 import time
 import uuid
@@ -38,103 +36,30 @@ from fastapi import FastAPI, File, Form, UploadFile, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.websockets import WebSocketDisconnect
 
+from bodhan_genai._serving_auth import BasicAuthMiddleware as _BasicAuthMiddleware
+from bodhan_genai._serving_auth import install_basic_auth as _install_basic_auth_shared
 from bodhan_genai.asr.serving.protocol import StreamStart, TranscribeRequest
 
 logger = logging.getLogger("asr.serving.service")
 
 
-class BasicAuthMiddleware:
-    """HTTP Basic auth over every route except the health probe.
-
-    Written as raw ASGI rather than a BaseHTTPMiddleware subclass because the
-    latter only sees ``http`` scopes -- the streaming websocket would sail
-    straight past it.
-    """
-
-    def __init__(self, app, user: str, password: str, exempt=("/health",)):
-        self.app = app
-        creds = f"{user}:{password}".encode()
-        # bytes, not str: compare_digest rejects non-ASCII str, so a header
-        # carrying any byte >= 0x80 raised TypeError and surfaced as a 500 --
-        # an unauthenticated caller could tell the middleware apart from a
-        # genuine 401 that way.
-        self._expected = b"Basic " + base64.b64encode(creds)
-        self.exempt = frozenset(exempt)
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] not in ("http", "websocket") or scope.get("path") in self.exempt:
-            return await self.app(scope, receive, send)
-
-        offered = b""
-        for key, value in scope.get("headers", ()):
-            if key == b"authorization":
-                offered = value
-                break
-        # compare_digest, not ==, so a wrong password cannot be recovered by
-        # timing how far the comparison got.
-        if secrets.compare_digest(offered, self._expected):
-            return await self.app(scope, receive, send)
-
-        if scope["type"] == "websocket":
-            await receive()  # drain websocket.connect before refusing
-            return await send({"type": "websocket.close", "code": 1008})
-
-        body = b"unauthorized\n"
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 401,
-                "headers": [
-                    (b"www-authenticate", b'Basic realm="Indic Transcribe"'),
-                    (b"content-type", b"text/plain; charset=utf-8"),
-                    (b"content-length", str(len(body)).encode()),
-                ],
-            }
-        )
-        await send({"type": "http.response.body", "body": body})
+# Auth lives in bodhan_genai._serving_auth, shared with the IndicSpeak deployment: duplicated
+# access control is a liability, and a fix applied to one copy and forgotten in the other is
+# exactly the bug you do not want here. Re-exported under the original names because
+# tests/asr/test_serving_service.py imports them from this module.
+BasicAuthMiddleware = _BasicAuthMiddleware
 
 
 def _install_basic_auth(app) -> None:
-    """Require auth unless the operator opts out in so many words.
-
-    ASR_AUTH_FILE points at a readable ``user:password`` file. The credential
-    lives outside the repo so it is never committed and never passed through
-    Ray's runtime_env; only the path travels.
-
-    This USED to fail open: an unset variable logged one warning among Ray's
-    startup spam and served every endpoint unauthenticated, with /health still
-    returning 200 so nothing downstream noticed. On a box whose endpoints drive
-    several H100s, forgetting an export is not an acceptable way to disable the
-    only access control, so an unset variable is now fatal and turning it off
-    takes ASR_AUTH_ALLOW_OPEN=1.
-    """
-    path = os.environ.get("ASR_AUTH_FILE", "").strip()
-    if not path:
-        if os.environ.get("ASR_AUTH_ALLOW_OPEN", "").strip() == "1":
-            logger.warning("[asr.auth] ASR_AUTH_ALLOW_OPEN=1 - endpoints are OPEN")
-            return
-        raise RuntimeError(
-            "ASR_AUTH_FILE is unset: point it at a 'user:password' file, or set "
-            "ASR_AUTH_ALLOW_OPEN=1 to serve without authentication on purpose"
-        )
-    try:
-        with open(path) as fh:
-            user, _, password = fh.read().strip().partition(":")
-    except OSError as e:
-        raise RuntimeError(f"ASR_AUTH_FILE={path!r} is unreadable: {e}") from e
-    if not user or not password:
-        raise RuntimeError(f"ASR_AUTH_FILE={path!r} is not 'user:password'")
-    app.add_middleware(BasicAuthMiddleware, user=user, password=password)
-    logger.info("[asr.auth] basic auth enabled for user %r", user)
+    """Install HTTP Basic auth if ASR_AUTH_FILE is set; open otherwise. See the shared module."""
+    _install_basic_auth_shared(app, prefix="ASR", realm="Indic Transcribe")
 
 
 api = FastAPI()
-# Auth is installed by build_deployment(), NOT here. Calling it at module scope made
-# `import bodhan_genai.asr.serving.service` raise unless ASR_AUTH_FILE was exported,
-# which breaks every reader of this module -- tooling, `python -c`, an editor -- for a
-# check that only matters when something is actually served. The fail-closed behaviour
-# is unchanged: build_deployment() still refuses to build without a credential or an
-# explicit ASR_AUTH_ALLOW_OPEN=1.
+# Auth is optional and installed by build_deployment(), NOT here: reading the environment
+# at module scope makes `import bodhan_genai.asr.serving.service` behave differently for
+# every reader of this module -- tooling, `python -c`, an editor -- over a setting that
+# only matters when something is actually served.
 
 # Raw little-endian int16 PCM, mono — the same wire format the TTS server
 # emits, so one can be piped into the other without a converter.

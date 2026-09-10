@@ -21,7 +21,7 @@ entirely.
 | Streaming engine | `IndicStreamingTTSEngine()` | async int16-PCM streaming in Python |
 | Batch CLI | `python -m bodhan_genai.tts.inference.cli vllm` (`scripts/tts/infer.sh`) | manifests: two-phase vLLM generate → batched SNAC decode |
 | Single-prompt CLI | `python -m bodhan_genai.tts.inference.cli hf` | one prompt through HF `generate()` — sample-quality checks, adapters |
-| Server | `scripts/tts/serve.sh` | Ray Serve: `WS /tts`, `WS /tts/chunked`, `POST /tts/offline` — see [Serving](serving.md) |
+| Server | `scripts/tts/serve.sh` | Ray Serve: `WS /tts`, `WS /tts/chunked`, `POST /tts/sse`, `POST /tts/offline` — see [Serving](serving.md) |
 
 With the defaults in place, the shortest path to audio is:
 
@@ -55,7 +55,7 @@ A decoder that cannot be loaded **raises rather than falling back** to SNAC's de
 silently decoding with a different vocoder than the one requested would be worse than failing.
 
 **Streaming still decodes with stock SNAC.** `IndicStreamingTTSEngine` — and therefore the
-server, whose three endpoints (including `POST /tts/offline`) all run on it — uses SNAC's own
+server, whose four endpoints (including `POST /tts/offline`) all run on it — uses SNAC's own
 decoder; its windowed decode is CUDA-graph
 compiled with a constant batch/window shape, so swapping Vocos in there is separate work. Until
 then, offline and streaming output audio from different vocoders.

@@ -99,8 +99,9 @@ Long-form text should go through the chunked path rather than one giant call —
 CHECKPOINT=/path/to/my-ckpt PORT=8000 ./scripts/tts/serve.sh
 ```
 
-One merged WS-ingress + vLLM AsyncLLM + in-process SNAC replica per GPU. Three endpoints: offline
-POST, `/tts` stream, `/tts/chunked`.
+One merged WS-ingress + vLLM AsyncLLM + in-process SNAC replica per GPU. Four endpoints: offline
+POST, `/tts` stream, `/tts/chunked`, and `/tts/sse` (the stream over plain HTTP). Every route
+except `/health` needs a credential — see [Serving](serving.md#authentication).
 
 | env | default | note |
 |---|---|---|

@@ -4,10 +4,15 @@ Connects a WebSocket to the server, sends one JSON synthesis request, receives
 raw int16 PCM frames as they are decoded, reports TTFP (time to first PCM
 frame), and writes the full utterance to a 24 kHz WAV.
 
-Start a server first (see scripts/serve.sh), then:
+Start a server first (see scripts/tts/serve.sh), then:
 
-    python examples/tts/streaming_client.py --url ws://localhost:8000/tts \
+    python examples/tts/streaming_client.py --auth alice:$TOKEN \
         --text "Hello from bodhan." --speaker spk1 --out hello.wav
+
+``--mode sse`` runs the same stream over plain HTTP instead, for a caller that
+cannot hold a websocket open. The server requires a credential unless it was
+started with ``TTS_AUTH_ALLOW_OPEN=1``; ``--auth`` takes ``user:password``, or
+set ``TTS_AUTH_FILE`` to the file the server reads.
 
 This is a thin wrapper over ``bodhan_genai.tts.serving.client`` — see that module
 for the actual connect / send / receive-PCM / write-WAV loop.
