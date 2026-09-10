@@ -1,7 +1,7 @@
 # Evaluating IndicSpeak
 
 The **numbers** live in the
-[package README](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/tts/README.md#evaluation)
+[package README](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/tts/README.md#evaluation)
 — that is the canonical doc for the model. This page is how you would produce them, and what the
 repo does and does not give you for that.
 

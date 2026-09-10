@@ -53,7 +53,7 @@ One environment covers every modality:
 
 The order the installer encodes is load-bearing, and so are the flags for lean, CPU-only,
 air-gapped and non-default-CUDA installs. Rather than repeat them here where they would drift,
-they live in one place: **the [repository README](https://github.com/AshwinSankar17/bodhan_gen_ai_tools#install)**.
+they live in one place: **the [repository README](https://github.com/Bodhan-AI/bodhan_genai#install)**.
 
 If an install went wrong, go straight to [Troubleshooting](troubleshooting.md).
 

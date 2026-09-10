@@ -283,8 +283,8 @@ docs = [
 ]
 
 [project.urls]
-Repository = "https://github.com/AshwinSankar17/bodhan_gen_ai_tools"
-Changelog = "https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/CHANGELOG.md"
+Repository = "https://github.com/Bodhan-AI/bodhan_genai"
+Changelog = "https://github.com/Bodhan-AI/bodhan_genai/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bodhan_genai"]

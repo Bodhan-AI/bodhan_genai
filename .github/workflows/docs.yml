@@ -17,8 +17,11 @@ name: docs
 #   2. Settings > Secrets and variables > Actions > Variables: ENABLE_PAGES = true
 # Until then the built site is attached to every run as a downloadable artifact.
 on:
+  # main and master: this tree lives in two repos with different default branches
+  # (Bodhan-AI/bodhan_genai uses main). Filtering on master alone meant nothing ever
+  # ran there -- the CI badge had no status to report.
   push:
-    branches: [master]
+    branches: [main, master]
   pull_request:
 
 concurrency:

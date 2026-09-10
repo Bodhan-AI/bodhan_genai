@@ -51,7 +51,7 @@ are working on improving recognition and extending support to additional languag
 
 ## Usage
 
-Inside this repo, see [the package README](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/ocr/README.md)
+Inside this repo, see [the package README](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/ocr/README.md)
 for install and the Python API, and [end-to-end](end-to-end.md) for a walkthrough. To use the weights directly from the
 Hub, follow the install and inference sections of the
 [model card](https://huggingface.co/bodhan-ai/indic-ocr).

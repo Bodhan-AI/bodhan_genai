@@ -6,7 +6,7 @@
 
 Data pipelines · training · inference · serving
 
-[![CI](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/actions/workflows/ci.yml/badge.svg)](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/actions/workflows/ci.yml)
+[![CI](https://github.com/Bodhan-AI/bodhan_genai/actions/workflows/ci.yml/badge.svg)](https://github.com/Bodhan-AI/bodhan_genai/actions/workflows/ci.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)](CHANGELOG.md)

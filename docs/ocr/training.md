@@ -32,7 +32,7 @@ scripts/ocr/eval.sh --ckpt runs/layout/final
 ## The corpus
 
 The datasets are **not** shipped — they are large and separately licensed.
-[`configs/ocr/data/sources.yaml`](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/configs/ocr/data/sources.yaml)
+[`configs/ocr/data/sources.yaml`](https://github.com/Bodhan-AI/bodhan_genai/blob/main/configs/ocr/data/sources.yaml)
 documents the seven sources and the on-disk layout each must be staged into:
 
 ```

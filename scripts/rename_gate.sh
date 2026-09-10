@@ -20,8 +20,11 @@ set -u
 GATE='\bBodhan(TTS|MT|ASR|OCR|Streaming)|ChunkedBodhan|\bIndicCanary'
 KEEP=(tests/asr/test_legacy_model_type.py tests/ocr/test_ocr_lazy_import.py)
 
-# Retired: the fail-closed serving gates, removed when auth became opt-in.
-RETIRED='[A-Z]+_AUTH_ALLOW_OPEN'
+# Retired: the fail-closed serving gates (removed when auth became opt-in), and the old repo
+# slug. The slug matters more than it looks -- 16 links, the CI badge, mkdocs repo_url and the
+# pyproject Repository/Changelog metadata all pointed at a private personal repo, and every one
+# of them shipped to the public repo, where they 404 for anyone outside.
+RETIRED='[A-Z]+_AUTH_ALLOW_OPEN|bodhan_gen_ai_tools|BodhanGenAI'
 
 echo "--- forward: no stale names outside the allowlist ---"
 if git grep -nE "$GATE" -- . ':!CHANGELOG.md' ':!docs/superpowers' \

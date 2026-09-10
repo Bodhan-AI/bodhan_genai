@@ -9,8 +9,11 @@ name: code-quality
 # same ground for Python and actually runs here.
 
 on:
+  # main and master: this tree lives in two repos with different default branches
+  # (Bodhan-AI/bodhan_genai uses main). Filtering on master alone meant nothing ever
+  # ran there -- the CI badge had no status to report.
   push:
-    branches: [master]
+    branches: [main, master]
   pull_request:
   schedule:
     # Advisories move independently of this repo, so re-scan weekly.

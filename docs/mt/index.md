@@ -50,4 +50,4 @@ Note what is never passed: a source language. The same call handles both directi
 - [API reference](../reference/mt.md) — classes and functions
 
 Full package documentation, including quickstart and troubleshooting, lives in
-[`src/bodhan_genai/mt/README.md`](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/mt/README.md).
+[`src/bodhan_genai/mt/README.md`](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/mt/README.md).

@@ -1,7 +1,7 @@
 site_name: Bodhan GenAI
 site_description: Model tooling for Bodhan's generative models — TTS, MT and OCR.
-repo_url: https://github.com/AshwinSankar17/bodhan_gen_ai_tools
-repo_name: bodhan_gen_ai_tools
+repo_url: https://github.com/Bodhan-AI/bodhan_genai
+repo_name: Bodhan-AI/bodhan_genai
 edit_uri: edit/master/docs/
 
 # MkDocs rather than Sphinx for one deciding reason: mkdocstrings reads the source

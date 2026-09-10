@@ -138,4 +138,4 @@ On a box that only serves or runs inference, `./install.sh --no-flash-attn` is c
 - [Configs](configs.md) — every field
 - [Release qualification](release.md) — the gate before a checkpoint ships
 - [Evaluation](eval.md) — reproducing the numbers in the
-  [package README](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/tts/README.md#evaluation)
+  [package README](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/tts/README.md#evaluation)

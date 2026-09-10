@@ -56,4 +56,4 @@ paid once instead of per page.
 - [API reference](../reference/ocr.md) — classes and functions
 
 Full package documentation, including quickstart and troubleshooting, lives in
-[`src/bodhan_genai/ocr/README.md`](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/ocr/README.md).
+[`src/bodhan_genai/ocr/README.md`](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/ocr/README.md).

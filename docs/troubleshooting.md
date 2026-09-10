@@ -1,9 +1,9 @@
 # Troubleshooting
 
 Failure modes shared by every modality. Anything specific to one stack lives with that stack:
-[IndicSpeak](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/tts/README.md#troubleshooting) ·
-[IndicTranslate](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/mt/README.md#troubleshooting) ·
-[IndicOCR](https://github.com/AshwinSankar17/bodhan_gen_ai_tools/blob/master/src/bodhan_genai/ocr/README.md#troubleshooting) ·
+[IndicSpeak](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/tts/README.md#troubleshooting) ·
+[IndicTranslate](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/mt/README.md#troubleshooting) ·
+[IndicOCR](https://github.com/Bodhan-AI/bodhan_genai/blob/main/src/bodhan_genai/ocr/README.md#troubleshooting) ·
 [IndicTranscribe caveats](asr/caveats.md).
 
 Most of these share one cause: **the environment was built in the wrong order, or against the

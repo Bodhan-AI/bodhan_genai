@@ -121,6 +121,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning documents (`docs/superpowers/`) are excluded from the built site and from the public
   snapshot; they are working notes, not documentation.
 
+### Fixed
+
+- **Every repository link pointed at the wrong repository.** The CI badge, `mkdocs.yml`'s
+  `repo_url`, `pyproject.toml`'s `Repository` and `Changelog` metadata and twelve documentation
+  links all named a repository readers cannot access, so each one 404s — and the packaging
+  metadata would have shipped that URL to PyPI. They now point at `Bodhan-AI/bodhan_genai`, and
+  `blob/master` becomes `blob/main` to match its default branch. The old slug is in the
+  dead-name gate, so it cannot come back.
+- **CI never ran on the published repo.** `ci.yml`, `code-quality.yml` and `docs.yml` filtered
+  `push: branches: [master]`, and the published repo's default branch is `main`, so no push
+  there ever triggered a run and the CI badge had no status to report. They now match both.
+
 ### Added — enforcement
 
 - **`scripts/rename_gate.sh` runs in pre-commit and CI**, and covers identifiers *deleted*
