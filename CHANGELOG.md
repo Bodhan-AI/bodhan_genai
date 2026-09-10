@@ -133,6 +133,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `push: branches: [master]`, and the published repo's default branch is `main`, so no push
   there ever triggered a run and the CI badge had no status to report. They now match both.
 
+### Fixed — one more vLLM env default, in all four entry points
+
+- **`VLLM_USE_DEEP_GEMM=0` is now set wherever we build a vLLM engine.** IndicOCR's recognizer
+  set it; the IndicSpeak and IndicTranslate engines did not, and the `mt`/`ocr` shell launchers
+  set it while the library paths did not — so the gap only bit callers who import an engine
+  directly. On a node with the CUDA runtime but no `nvcc`, vLLM probes
+  `vllm.third_party.deep_gemm`, whose import asserts on `_find_cuda_home()`; it logs a
+  twenty-line traceback ending in a bare `AssertionError`, then carries on. Nothing breaks, but
+  a healthy engine start reads as a crash in the log, and it looked modality-specific because
+  only one of the three suppressed it. Found in the end-to-end run against the published tree.
+
 ### Added — enforcement
 
 - **`scripts/rename_gate.sh` runs in pre-commit and CI**, and covers identifiers *deleted*

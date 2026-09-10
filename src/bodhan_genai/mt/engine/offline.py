@@ -102,6 +102,12 @@ class _VllmBackend:
             # naming flashinfer. The native sampler is equivalent for greedy decoding.
             # Override by exporting VLLM_USE_FLASHINFER_SAMPLER=1 where nvcc exists.
             os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+            # Same reason, different kernel: vLLM probes vllm.third_party.deep_gemm, whose import
+            # asserts on _find_cuda_home(). Without nvcc that assertion fails and vLLM logs a
+            # twenty-line traceback ending in a bare AssertionError, then carries on -- so a
+            # perfectly healthy engine start looks like a crash. IndicOCR's recognizer has always
+            # set this; the TTS and MT engines did not, which made the noise look modality-specific.
+            os.environ.setdefault("VLLM_USE_DEEP_GEMM", "0")
 
             from vllm import LLM
 

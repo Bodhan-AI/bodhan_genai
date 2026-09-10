@@ -20,6 +20,11 @@ Without a GPU the ``*_vllm`` stages are skipped and the transformers paths run i
 green CPU run says "the weights load and the plumbing is connected", not that the production
 backends work. Run it on a GPU with the pinned environment before a release.
 
+All stages share ONE process, so vLLM engines accumulate: a stage late in the order sees a
+card that earlier stages have largely filled. Every vLLM stage therefore passes an explicit
+``gpu_memory_utilization``, and a stage that forgets fails with vLLM's "Free memory ... is
+less than desired" -- which looks like a product bug and is not one.
+
 Everything runs under ``if __name__ == "__main__"``. That is load-bearing, not style: vLLM
 switches multiprocessing to ``spawn`` once CUDA is initialised, and spawn re-imports this
 module in each worker. Stages at module level re-run inside every child and abort there.
@@ -37,6 +42,9 @@ import time
 import traceback
 
 os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+# deep_gemm asserts on _find_cuda_home(); without nvcc that is a 20-line traceback in the
+# middle of a healthy run. Harmless, and indistinguishable from a real failure in a log.
+os.environ.setdefault("VLLM_USE_DEEP_GEMM", "0")
 # vLLM forks its engine core unless CUDA is already initialised, in which case it switches to
 # spawn on its own. This harness probes torch.cuda.is_available() to pick a device *before*
 # building an engine, which initialises CUDA and makes the fork path fail with
@@ -221,12 +229,22 @@ def ocr_vllm() -> str:
 
 
 def ocr_full() -> str:
-    """Both OCR stages in one call, the way a caller uses it."""
+    """Both OCR stages in one call, the way a caller uses it.
+
+    The memory cap is not cosmetic. Every stage runs in ONE process, so each vLLM engine
+    built earlier is still holding its slice when this one starts. ``IndicOCR()`` with
+    default config asks for ``gpu_memory_utilization=0.8`` -- 63 GiB of an 80 GiB card --
+    which cannot be satisfied after the TTS, MT and recognizer engines have run, and vLLM
+    refuses with "Free memory ... is less than desired GPU memory utilization". That is
+    the harness colliding with itself, and it reads exactly like a product failure.
+    """
     from bodhan_genai.ocr import IndicOCR
+    from bodhan_genai.ocr.engine.types import RecognizerConfig
 
     if not _cuda():
         return "skipped: the recognizer half needs a GPU"
-    with IndicOCR() as o:
+    cfg = RecognizerConfig(gpu_memory_utilization=0.30, max_model_len=4096)
+    with IndicOCR(recognizer_config=cfg) as o:
         page = o.parse(_page("/tmp/e2e_full_page.png"))
     assert page.blocks and page.markdown.strip(), "empty page result"
     return f"{len(page.blocks)} blocks -> {len(page.markdown)} chars of markdown"
