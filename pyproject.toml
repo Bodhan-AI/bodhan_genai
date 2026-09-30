@@ -162,11 +162,15 @@ mt-serve = [
   "openai>=2.0.0",
   "huggingface_hub>=1.0.0",
 ]
-# IN22 score replication.
+# IN22 score replication, plus the romanized/transliteration eval.
 mt-eval = [
   "datasets==5.0.1",
   "sacrebleu==2.6.0",
   "openai>=2.0.0",
+  # Transliteration is character-level, so BLEU says little and CER/WER carry the
+  # signal. jiwer is a separate edit-distance implementation from sacreBLEU's, so
+  # the two agreeing is free verification rather than one path checked twice.
+  "jiwer>=4.0",
 ]
 
 # --------------------------------------------------------------------------- #

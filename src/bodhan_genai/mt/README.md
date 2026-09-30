@@ -1,9 +1,20 @@
 # IndicTranslate — `bodhan_genai.mt`
 
-Translation between English and 22 Eighth-Schedule Indian languages (25 language-script
+Translation between English and 22 Eighth-Schedule Indian languages (26 language-script
 combinations, 44 directions). A decoder-only multimodal LLM
 (`Gemma4ForConditionalGeneration`, base `google/gemma-4-E4B-it`, 7.94 B params bf16),
 instruction-tuned for translation.
+
+Published at [`bodhan-ai/indic-translate`](https://huggingface.co/bodhan-ai/indic-translate) —
+the model card there has the capability details, supported languages and quality numbers.
+
+| capability | how you ask for it |
+|---|---|
+| Sentence translation, 44 directions | `translate(text, tgt_lang="hin_Deva")` |
+| Document translation, structure preserved, to 32,768 tokens | `translate_document(text, tgt_lang="hin_Deva", max_new_tokens=8192)` |
+| Romanized translation — the target in Latin letters | `translate(text, tgt_lang="hin_Deva", script="roman")` |
+| Transliteration — script changes, language does not | `transliterate(text, lang="hin_Deva", script="roman")` |
+| Code-mixed translation | `translate(text, tgt_lang="hin_Deva", script="code_mixed")` |
 
 > Repo-level overview: [../../../README.md](../../../README.md)
 > **New to MT? [docs/mt/end-to-end.md](../../../docs/mt/end-to-end.md) walks the whole pipeline in
@@ -25,6 +36,7 @@ flowchart LR
 ## Contents
 
 [Features](#features) · [Install](#install) · [The prompt contract](#the-prompt-contract) ·
+[Hosted API](#the-hosted-api--no-gpu-no-checkpoint) ·
 [Python API](#python-api) · [Quickstart](#quickstart) · [Docker](#serve-with-docker) ·
 [Configs](#configuration) · [Troubleshooting](#troubleshooting)
 
@@ -32,9 +44,14 @@ flowchart LR
 
 ## Features
 
-- **Public engine API** — `IndicMTEngine` with a `vllm` backend for throughput and an `hf` backend
-  for a dependency-light reference run or an unmerged PEFT adapter. Greedy by default: the
-  recommended setting for translation and the only reproducible one.
+- **Three backends, one API** — the **hosted Bodhan API** (the default when `BODHAN_API_KEY` is
+  set: no GPU, no checkpoint, no extras), `vllm` for throughput, and `hf` for a dependency-light
+  reference run or an unmerged PEFT adapter. Greedy by default: the recommended setting for
+  translation and the only reproducible one. See
+  [docs/mt/api.md](../../../docs/mt/api.md).
+- **Romanized output, transliteration and code-mix** — selected by `script=` and `task=` on the
+  same calls, with the name tables and the traps in
+  [docs/mt/prompt_contract.md](../../../docs/mt/prompt_contract.md).
 - **One prompt contract, enforced in code** — every path builds requests through
   `bodhan_genai.mt.templates.prompt`, so the target language is always named, the source never is,
   and there is always exactly one user turn.
@@ -49,6 +66,8 @@ flowchart LR
   vLLM demands, so a checkpoint you trained loads unpatched.
 - **IN22 score replication** — BLEU + chrF++ over 44 directions, with pooled and macro aggregates
   reported separately ([docs/mt/eval.md](../../../docs/mt/eval.md)).
+- **Romanized / transliteration eval** — `eval.roman` scores four directions, with CER and WER
+  from jiwer reported as a pair alongside chrF++.
 
 ## Evaluation
 
@@ -118,6 +137,45 @@ measured **29.9 chrF++ worse**.
 
 ## Python API
 
+### The hosted API — no GPU, no checkpoint
+
+Export a key and the hosted service becomes the **default** backend:
+
+```bash
+export BODHAN_API_KEY=sk-...        # or BODHAN_API_TOKEN
+```
+
+```python
+from bodhan_genai.mt import IndicMTEngine
+
+with IndicMTEngine() as engine:  # note: no model path
+    print(engine.translate("The meeting has been postponed.", tgt_lang="kn").text)
+    print(engine.translate_batch(segments, tgt_lang="Tamil"))
+```
+
+Resolution order: an explicit `backend=` always wins; else a key selects `"api"`; else `"vllm"`.
+So nothing that names a backend changes behaviour, and an exported-but-**empty** key counts as
+absent rather than selecting a path that would fail on every request.
+
+```python
+IndicMTEngine(ckpt, backend="vllm")  # force local, key or no key
+IndicMTEngine(api_key="sk-...", api_base_url="https://console.bodhan.ai/v1")  # explicit
+```
+
+The hosted service is OpenAI-compatible and takes the rendered prompt, so it has **full capability
+parity** with the local backends — Roman output, transliteration, code-mix and script-qualified
+names all work, `truncated` is reported from `finish_reason`, and decoding is greedy:
+
+```python
+engine.translate(text, tgt_lang="hin_Deva", script="roman")
+engine.transliterate(text, lang="hin_Deva", script="roman")
+engine.translate(text, tgt_lang="kas_Deva")  # the script qualifier survives
+```
+
+Retry, rate limits and the error taxonomy: [docs/mt/api.md](../../../docs/mt/api.md).
+
+### Local inference
+
 ```python
 from bodhan_genai.mt import IndicMTEngine
 
@@ -135,7 +193,21 @@ results = engine.translate_batch(segments, tgt_lang="Tamil")  # one continuous v
 doc = engine.translate_document(article, tgt_lang="Kannada", max_new_tokens=8192)
 ```
 
+Roman output, transliteration and code-mix — local backends only:
+
+```python
+engine.translate(text, tgt_lang="hin_Deva", script="roman")  # Hindi in Latin letters
+engine.translate(text, tgt_lang="hin_Deva", script="code_mixed")  # English mixed in
+engine.transliterate(text, lang="hin_Deva", script="roman")  # script changes, language does not
+engine.transliterate(text, lang="hin_Deva", script="native")  # and back
+```
+
+`script="roman"` asks for the target language written in Latin letters — not a translation into
+English, which is `tgt_lang="eng_Latn"`.
+
 Per-row failures land in `result.error` rather than raising, so one bad segment never loses a run.
+Check `result.truncated` too: a translation that hit the token budget comes back fluent and simply
+stops, and nothing else signals it.
 
 Against a running server:
 
@@ -162,17 +234,27 @@ Runnable walkthroughs: [notebooks/mt/inference.ipynb](../../../notebooks/mt/infe
 python examples/mt/basic_translate.py --tgt-lang Hindi \
     --text "The committee approved the proposal after a long debate."
 
-python -m bodhan_genai.mt.inference.cli hf --list-languages     # the 25 supported targets
+python -m bodhan_genai.mt.inference.cli hf --list-languages     # the 26 supported targets
 ```
 
-### 2. Batch inference
+### 2. Translate over the hosted API
+
+```bash
+export BODHAN_API_KEY=sk-...
+python -m bodhan_genai.mt.inference.api_translate --tgt-lang kn \
+    --text "The meeting has been postponed."
+```
+
+No GPU and no checkpoint download. See [docs/mt/api.md](../../../docs/mt/api.md).
+
+### 3. Batch inference
 
 ```bash
 scripts/mt/infer.sh --tgt-lang mar_Deva --input-file segments.txt --output-file out.jsonl
 scripts/mt/infer.sh --tgt-lang Tamil --document --input-file article.txt --max-new-tokens 8192
 ```
 
-### 3. Serve
+### 4. Serve
 
 ```bash
 scripts/mt/serve.sh                                     # or CHECKPOINT=/path/to/ckpt
@@ -182,14 +264,14 @@ python examples/mt/serve_client.py --tgt-lang hin_Deva --text "Hello world"
 One server, the standard OpenAI chat API — plain curl works too, as long as the request follows the
 prompt contract ([docs/mt/serving.md](../../../docs/mt/serving.md)).
 
-### 4. Render training data
+### 5. Render training data
 
 ```bash
 scripts/mt/render.sh configs/mt/data/render.yaml --dry-run   # check the mix first
 scripts/mt/render.sh
 ```
 
-### 5. Finetune, merge, serve
+### 6. Finetune, merge, serve
 
 ```bash
 scripts/mt/train_lora.sh configs/mt/train/lora.yaml
@@ -200,7 +282,7 @@ CHECKPOINT=merged-ckpt-4400 scripts/mt/serve.sh
 `merge.sh` also runs `tools.vllm_ready`; without it a freshly merged checkpoint does not load on
 stock vLLM.
 
-### 6. Evaluate
+### 7. Evaluate
 
 ```bash
 scripts/mt/eval.sh --langs hin_Deva --directions en-xx --max-samples 32   # smoke

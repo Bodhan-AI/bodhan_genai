@@ -14,12 +14,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_API = {
     "IndicMTEngine",
     "LANGUAGE_NAMES",
+    "MTRequest",
     "MTResult",
     "MTSamplingConfig",
     "STOP_STRINGS",
     "build_conversation",
     "build_instruction",
     "resolve_language",
+    "resolve_target_name",
 }
 
 

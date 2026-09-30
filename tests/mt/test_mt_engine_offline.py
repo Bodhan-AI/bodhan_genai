@@ -9,30 +9,41 @@ from __future__ import annotations
 
 import pytest
 
-from bodhan_genai.mt.engine.offline import IndicMTEngine, TranslationBackend
-from bodhan_genai.mt.engine.types import MTSamplingConfig
+from bodhan_genai.mt.engine.offline import (
+    IndicMTEngine,
+    PromptedBackend,
+    TranslationBackend,
+)
+from bodhan_genai.mt.engine.types import BackendOutput, MTSamplingConfig
 
 
 class FakeBackend:
-    """Records what it was asked for and echoes a deterministic completion."""
+    """Records what it was asked for and echoes a deterministic completion.
+
+    Conversation-level, like the real vLLM and HF backends: it sees rendered
+    prompts, which is what lets these tests assert the prompt contract. The
+    engine reaches it through :class:`PromptedBackend`, the one place an
+    ``MTRequest`` becomes a prompt.
+    """
 
     def __init__(self, completions: list[str] | None = None) -> None:
         self.calls: list[tuple[list[list[dict[str, str]]], MTSamplingConfig]] = []
         self._completions = completions
         self.closed = False
 
-    def generate(self, conversations, sc):
+    def generate_conversations(self, conversations, sc):
         self.calls.append((conversations, sc))
-        if self._completions is not None:
-            return self._completions
-        return [f"translated:{c[0]['content'][-12:]}" for c in conversations]
+        texts = self._completions
+        if texts is None:
+            texts = [f"translated:{c[0]['content'][-12:]}" for c in conversations]
+        return [BackendOutput(text=t) for t in texts]
 
     def close(self):
         self.closed = True
 
 
 class BoomBackend:
-    def generate(self, conversations, sc):
+    def generate_conversations(self, conversations, sc):
         raise RuntimeError("CUDA out of memory")
 
     def close(self):
@@ -40,7 +51,7 @@ class BoomBackend:
 
 
 def test_fake_backend_satisfies_the_protocol():
-    assert isinstance(FakeBackend(), TranslationBackend)
+    assert isinstance(PromptedBackend(FakeBackend()), TranslationBackend)
 
 
 # --------------------------------------------------------------------------- #
@@ -50,7 +61,7 @@ def test_fake_backend_satisfies_the_protocol():
 
 def test_engine_builds_the_contract_conversation():
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     engine.translate("Hello world.", tgt_lang="hin_Deva")
 
     conversations, _ = backend.calls[0]
@@ -66,7 +77,7 @@ def test_engine_builds_the_contract_conversation():
 
 def test_src_lang_is_recorded_but_never_prompted():
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     result = engine.translate("Bonjour.", tgt_lang="Hindi", src_lang="fra_Latn")
 
     assert result.src_lang == "fra_Latn"
@@ -76,14 +87,14 @@ def test_src_lang_is_recorded_but_never_prompted():
 
 
 def test_tgt_lang_is_resolved_to_the_display_name_in_the_result():
-    engine = IndicMTEngine("dummy", backend=FakeBackend())
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(FakeBackend()))
     assert engine.translate("x", tgt_lang="mni_Beng").tgt_lang == "Manipuri (Bengali script)"
     assert engine.translate("x", tgt_lang="sindhi").tgt_lang == "Sindhi (Devanagari script)"
 
 
 def test_bad_language_fails_before_the_backend_is_touched():
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     with pytest.raises(ValueError, match="unsupported language"):
         engine.translate("x", tgt_lang="klingon")
     assert backend.calls == [], "backend was invoked despite an invalid language"
@@ -96,7 +107,7 @@ def test_bad_language_fails_before_the_backend_is_touched():
 
 def test_batch_is_one_backend_call_and_stays_aligned():
     backend = FakeBackend(completions=["A", "B", "C"])
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     results = engine.translate_batch(["one", "two", "three"], tgt_lang="Tamil")
 
     assert len(backend.calls) == 1, "batch should be a single generate call"
@@ -106,7 +117,7 @@ def test_batch_is_one_backend_call_and_stays_aligned():
 
 def test_empty_batch_short_circuits():
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     assert engine.translate_batch([], tgt_lang="Hindi") == []
     assert backend.calls == []
 
@@ -115,7 +126,7 @@ def test_misaligned_backend_output_raises_rather_than_mispairing():
     """Silently zipping mismatched lists would attach translations to the wrong
     sources — worse than failing."""
     backend = FakeBackend(completions=["only one"])
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     with pytest.raises(RuntimeError, match="misaligned"):
         engine.translate_batch(["a", "b"], tgt_lang="Hindi")
 
@@ -127,7 +138,7 @@ def test_misaligned_backend_output_raises_rather_than_mispairing():
 
 def test_per_call_overrides_reach_the_backend():
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     engine.translate("x", tgt_lang="Hindi", max_new_tokens=4096, temperature=0.7)
 
     _, sc = backend.calls[0]
@@ -139,7 +150,7 @@ def test_per_call_overrides_reach_the_backend():
 def test_constructor_sampling_is_the_default_and_is_not_mutated():
     base = MTSamplingConfig(max_new_tokens=2048)
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend, sampling=base)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend), sampling=base)
 
     engine.translate("x", tgt_lang="Hindi")
     engine.translate("x", tgt_lang="Hindi", max_new_tokens=8192)
@@ -150,14 +161,14 @@ def test_constructor_sampling_is_the_default_and_is_not_mutated():
 
 
 def test_unknown_override_raises():
-    engine = IndicMTEngine("dummy", backend=FakeBackend())
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(FakeBackend()))
     with pytest.raises(TypeError, match="Unknown MTSamplingConfig field"):
         engine.translate("x", tgt_lang="Hindi", top_k=50)
 
 
 def test_translate_document_is_a_single_request():
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     engine.translate_document("para one\n\npara two", tgt_lang="Tamil", max_new_tokens=8192)
 
     conversations, sc = backend.calls[0]
@@ -172,7 +183,7 @@ def test_translate_document_is_a_single_request():
 
 
 def test_backend_failure_lands_in_error_instead_of_raising():
-    engine = IndicMTEngine("dummy", backend=BoomBackend())
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(BoomBackend()))
     results = engine.translate_batch(["a", "b"], tgt_lang="Hindi")
 
     assert len(results) == 2
@@ -201,14 +212,14 @@ def test_unknown_backend_string_is_rejected():
 
 def test_context_manager_closes_the_backend():
     backend = FakeBackend()
-    with IndicMTEngine("dummy", backend=backend) as engine:
+    with IndicMTEngine("dummy", backend=PromptedBackend(backend)) as engine:
         engine.translate("x", tgt_lang="Hindi")
     assert backend.closed
 
 
 def test_close_is_idempotent():
     backend = FakeBackend()
-    engine = IndicMTEngine("dummy", backend=backend)
+    engine = IndicMTEngine("dummy", backend=PromptedBackend(backend))
     engine.close()
     engine.close()
     assert backend.closed

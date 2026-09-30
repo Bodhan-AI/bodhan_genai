@@ -1,5 +1,11 @@
 # Serving IndicTranslate
 
+
+!!! tip "You may not need a server"
+
+    If you have a Bodhan API key, [the hosted API](api.md) is the default backend and needs no
+    server, no GPU and no checkpoint. This page is for running the model yourself.
+
 ## Architecture: there is no custom server
 
 ```mermaid

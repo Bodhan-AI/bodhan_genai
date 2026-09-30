@@ -37,11 +37,13 @@ _LAZY = {
     "IndicMTEngine": "bodhan_genai.mt.engine.offline",
     "MTSamplingConfig": "bodhan_genai.mt.engine.types",
     "MTResult": "bodhan_genai.mt.engine.types",
+    "MTRequest": "bodhan_genai.mt.engine.types",
     "LANGUAGE_NAMES": "bodhan_genai.mt.templates.prompt",
     "STOP_STRINGS": "bodhan_genai.mt.templates.prompt",
     "build_conversation": "bodhan_genai.mt.templates.prompt",
     "build_instruction": "bodhan_genai.mt.templates.prompt",
     "resolve_language": "bodhan_genai.mt.templates.prompt",
+    "resolve_target_name": "bodhan_genai.mt.templates.prompt",
 }
 
 __all__ = ["__version__", *sorted(_LAZY)]

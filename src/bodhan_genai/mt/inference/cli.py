@@ -1,5 +1,6 @@
 """``python -m bodhan_genai.mt.inference.cli`` — dispatcher for the two inference paths.
 
+  python -m bodhan_genai.mt.inference.cli api ...   -> bodhan_genai.mt.inference.api_translate (hosted, no GPU)
   python -m bodhan_genai.mt.inference.cli vllm ...  -> bodhan_genai.mt.inference.offline_vllm (batch throughput)
   python -m bodhan_genai.mt.inference.cli hf ...    -> bodhan_genai.mt.inference.hf_generate  (reference, adapters)
 
@@ -21,6 +22,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser(
+        "api",
+        help="translate through the hosted Bodhan API (no GPU, no checkpoint)",
+        add_help=False,
+    )
+    sub.add_parser(
         "vllm",
         add_help=False,
         help="Batch translation on vLLM (whole corpus as one continuous batch).",
@@ -32,6 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args, rest = p.parse_known_args(argv)
+    if args.command == "api":
+        from bodhan_genai.mt.inference.api_translate import main as api_main
+
+        return api_main(rest)
     if args.command == "vllm":
         from bodhan_genai.mt.inference.offline_vllm import main as vllm_main
 

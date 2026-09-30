@@ -154,7 +154,7 @@ Installed as **argparse defaults**; explicit CLI flags always win. Nested sectio
 | `sampling.temperature` | 0.0 | greedy — recommended, and the only reproducible setting |
 | `sampling.top_p` | 1.0 | only used when temperature > 0 |
 | `sampling.repetition_penalty` | 1.0 | |
-| `sampling.max_new_tokens` | 512 | 512 sentence / 2048 paragraph / 8192 document |
+| `sampling.max_new_tokens` | 512 | 512 sentence / 2048 paragraph / 8192 document. Raising it is not free — see below. |
 | `sampling.seed` | 0 | only used when temperature > 0 |
 
 ---
@@ -171,3 +171,24 @@ overrides the process count from the visible GPU count.
 `multinode.yaml` differs only in the rendezvous — `rdzv_backend: c10d`, so ranks negotiate at
 startup and `machine_rank` is not baked in. `num_machines`, `num_processes` and `main_process_ip`
 come from the launch command, because the head node changes every allocation.
+
+## A bigger `max_new_tokens` is not automatically safer
+
+Under-budgeting truncates a long input mid-sentence; over-budgeting gives a degenerate generation
+room to run. Both are real, and the second is easy to miss because it looks like a quality problem.
+
+Measured on IN22-Gen, 64 samples per language, `en2roman`:
+
+| `max_new_tokens` | pooled chrF++ | rows flagged truncated |
+|---:|---:|---|
+| 512 | **34.00** | 2/64 hin, 12/64 kan |
+| 1024 | 30.00 | 2/64 hin, 11/64 tam, 12/64 kan |
+| 2048 | 23.04 | 2/64 hin, 13/64 tam, 12/64 kan |
+
+The score falls as the budget rises and the truncated count barely moves, because those rows are
+**repetition loops** rather than long translations — one was 3,583 characters against a
+~133-character median. A bigger budget only lets the loop run longer, and the extra output drags
+the pooled score down.
+
+The tell is a truncated count that does not change when you raise the budget. `eval.roman` reports
+these separately as `n_degenerate`; `bodhan_genai.mt.eval.metrics.is_degenerate` is the check.

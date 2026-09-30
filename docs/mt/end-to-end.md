@@ -95,12 +95,54 @@ doc = engine.translate_document(article, tgt_lang="Kannada", max_new_tokens=8192
 Per-row failures land in `result.error` instead of raising, so one bad segment never loses a run.
 Load the engine **once** per process — model load is ~16 GB and tens of seconds.
 
-### Two backends
+### Roman script, transliteration and code-mix
+
+```python
+engine.translate(text, tgt_lang="hin_Deva", script="roman")  # Hindi in Latin letters
+engine.translate(text, tgt_lang="hin_Deva", script="code_mixed")  # English mixed in
+engine.transliterate(text, lang="hin_Deva", script="roman")  # script changes, language does not
+engine.transliterate(text, lang="hin_Deva", script="native")  # and back
+```
+
+`script="roman"` asks for **the target language written in Latin letters** — it is not a
+translation into English, which is `tgt_lang="eng_Latn"`. Transliteration is a separate task with
+its own template, because asking the model to "translate into Hindi" text that is already Hindi
+would teach it that translating sometimes means leaving the content alone.
+
+Code-mix works on `vllm` and `hf` only; the hosted API does not expose it.
+
+### Check `truncated`
+
+```python
+r = engine.translate(long_text, tgt_lang="hin_Deva", max_new_tokens=2048)
+if r.truncated:
+    ...  # the output hit the budget and stopped mid-thought
+```
+
+A truncated translation comes back **fluent and simply stops** — no error, no warning. `ok` stays
+`True` (it is a real partial result that should still be scored); `complete` is the strict view.
+
+If the truncated count does not move when you raise the budget, the row is **degenerate** — the
+model looped — and a bigger budget only lets the loop run longer. Measured on IN22-Gen: raising
+512 to 2048 left the count unchanged and *lowered* chrF++.
+
+### Three backends
 
 | backend | use it for |
 |---|---|
-| `"vllm"` (default) | throughput; a whole corpus in one continuous batch |
+| `"api"` | the hosted service — no GPU, no checkpoint, no extras. **The default when `BODHAN_API_KEY` or `BODHAN_API_TOKEN` is set.** |
+| `"vllm"` | throughput; a whole corpus in one continuous batch. The default otherwise. |
 | `"hf"` | a dependency-light single run, or an **unmerged** PEFT adapter |
+
+An explicit `backend=` always wins over the token sniff, so anything that names a backend is
+unaffected. With a key exported you need no checkpoint at all:
+
+```python
+with IndicMTEngine() as engine:  # note: no model path
+    engine.translate("The meeting has been postponed.", tgt_lang="kn")
+```
+
+See [the hosted API page](api.md) for the routes, retries and error codes.
 
 ```python
 IndicMTEngine(base, backend="hf", adapter_dir="training_output/mt-lora-8k")
@@ -111,7 +153,7 @@ IndicMTEngine(base, backend="hf", adapter_dir="training_output/mt-lora-8k")
 ### CLI
 
 ```bash
-# list the 25 supported targets
+# list the 26 supported targets
 python -m bodhan_genai.mt.inference.cli hf --list-languages
 
 # one segment
