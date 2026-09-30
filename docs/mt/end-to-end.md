@@ -357,7 +357,7 @@ picks a free port, waits for readiness, and records what it bound:
 
 ```bash
 scripts/mt/serve.sh                                   # published checkpoint, GPU 0, port 8000
-CHECKPOINT=merged-ckpt-4400 scripts/mt/serve.sh       # your finetune
+scripts/mt/serve.sh --model merged-ckpt-4400          # your finetune
 GPU=3 PORT=8100 MAX_MODEL_LEN=32768 scripts/mt/serve.sh
 ```
 
@@ -445,7 +445,7 @@ scripts/mt/train_lora.sh configs/mt/train/lora.yaml
 scripts/mt/merge.sh training_output/mt-lora-8k/checkpoint-4400 merged-ckpt-4400
 
 # serve it, then score it
-CHECKPOINT=merged-ckpt-4400 scripts/mt/serve.sh
+scripts/mt/serve.sh --model merged-ckpt-4400
 scripts/mt/eval.sh
 ```
 

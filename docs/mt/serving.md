@@ -36,7 +36,7 @@ What *is* worth owning in-process is the [prompt contract](prompt_contract.md), 
 
 ```bash
 scripts/mt/serve.sh                                   # published checkpoint, GPU 0, port 8000
-CHECKPOINT=/path/to/merged-ckpt scripts/mt/serve.sh   # your own finetune
+scripts/mt/serve.sh --model /path/to/merged-ckpt      # your own finetune
 GPU=3 PORT=8100 scripts/mt/serve.sh
 MAX_MODEL_LEN=32768 scripts/mt/serve.sh               # document workloads
 scripts/mt/serve.sh --foreground                      # don't background
@@ -48,7 +48,7 @@ Extra flags pass through to `vllm serve`.
 
 | var | default | notes |
 |---|---|---|
-| `CHECKPOINT` | `bodhan-ai/indic-translate` | local path or hub id |
+| `CHECKPOINT` | — | **deployment images only** (`BODHAN_GENAI_DEPLOYMENT=1`, set by the Dockerfile). Anywhere else it is ignored, with a warning. To serve a local checkpoint, pass `--model /path/or/hub-id` |
 | `SERVED_NAME` | `indic_translate` | the name clients must ask for |
 | `GPU` | `0` | sets `CUDA_VISIBLE_DEVICES` |
 | `PORT` | `8000` | auto-searches +200 if taken |

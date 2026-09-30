@@ -276,7 +276,7 @@ scripts/mt/render.sh
 ```bash
 scripts/mt/train_lora.sh configs/mt/train/lora.yaml
 scripts/mt/merge.sh training_output/mt-lora-8k/checkpoint-4400 merged-ckpt-4400
-CHECKPOINT=merged-ckpt-4400 scripts/mt/serve.sh
+scripts/mt/serve.sh --model merged-ckpt-4400
 ```
 
 `merge.sh` also runs `tools.vllm_ready`; without it a freshly merged checkpoint does not load on
