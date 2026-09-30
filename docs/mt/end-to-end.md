@@ -109,7 +109,7 @@ translation into English, which is `tgt_lang="eng_Latn"`. Transliteration is a s
 its own template, because asking the model to "translate into Hindi" text that is already Hindi
 would teach it that translating sometimes means leaving the content alone.
 
-Code-mix works on `vllm` and `hf` only; the hosted API does not expose it.
+All three work on every backend, [the hosted API](api.md) included.
 
 ### Check `truncated`
 

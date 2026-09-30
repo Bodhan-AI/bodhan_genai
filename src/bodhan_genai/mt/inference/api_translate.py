@@ -8,10 +8,10 @@
 
 The key comes from ``BODHAN_API_KEY`` or ``BODHAN_API_TOKEN``, or ``--api-key``.
 
-**Translation only.** The hosted route serves native-script translation; Roman
-output, transliteration and code-mix are not reachable over it and are refused
-rather than silently returning native script. Use the ``vllm`` or ``hf`` paths
-for those — see ``docs/mt/api.md``.
+**Native-script translation only, from this CLI** -- it has no ``--script`` or
+``--task`` flag. The hosted backend itself carries Roman output, transliteration and
+code-mix like the local ones do; reach them from Python with
+``IndicMTEngine(backend="api")`` -- see ``docs/mt/api.md``.
 """
 
 from __future__ import annotations

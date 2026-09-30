@@ -19,7 +19,7 @@ card there for capability details, supported languages and quality numbers.
 | **Transliteration** — script changes, language does not | `transliterate(text, lang="hin_Deva", script="roman")` |
 | **Code-mixed translation** — English mixed into the target | `translate(text, tgt_lang="hin_Deva", script="code_mixed")` |
 
-Code-mix is reachable on the local backends only; the [hosted API](api.md) does not expose it.
+All three are reachable on every backend, [the hosted API](api.md) included.
 
 There are **no language tokens and no `forced_bos_token_id`**: the target language is an English
 name interpolated into an instruction, and the source language is never named — the model infers

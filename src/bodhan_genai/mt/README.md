@@ -193,7 +193,7 @@ results = engine.translate_batch(segments, tgt_lang="Tamil")  # one continuous v
 doc = engine.translate_document(article, tgt_lang="Kannada", max_new_tokens=8192)
 ```
 
-Roman output, transliteration and code-mix — local backends only:
+Roman output, transliteration and code-mix — on every backend, the hosted API included:
 
 ```python
 engine.translate(text, tgt_lang="hin_Deva", script="roman")  # Hindi in Latin letters
