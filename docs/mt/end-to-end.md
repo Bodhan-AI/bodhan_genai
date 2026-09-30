@@ -361,7 +361,7 @@ CHECKPOINT=merged-ckpt-4400 scripts/mt/serve.sh       # your finetune
 GPU=3 PORT=8100 MAX_MODEL_LEN=32768 scripts/mt/serve.sh
 ```
 
-It writes `vllm-serve.info` with the port actually bound, because a busy port makes it move. Sanity
+It writes `mt-serve.info` with the port actually bound, because a busy port makes it move. Sanity
 signs in the log:
 
 ```

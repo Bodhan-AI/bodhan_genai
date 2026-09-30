@@ -27,7 +27,7 @@ What *is* worth owning in-process is the [prompt contract](prompt_contract.md), 
 
 | module | role |
 |---|---|
-| `scripts/mt/serve.sh` | launches `vllm serve` with the validated flags; free-port search; readiness gate; writes `vllm-serve.info` |
+| `scripts/mt/serve.sh` | launches `vllm serve` with the validated flags; free-port search; readiness gate; writes `mt-serve.info` |
 | `bodhan_genai.mt.serving.client` | `MTClient` — typed client that builds correct requests; also a CLI |
 | `bodhan_genai.mt.tools.vllm_ready` | adds the KV-shared `k_norm` sidecar a self-trained checkpoint needs |
 | `bodhan_genai.mt.training.merge` | adapter → standalone servable checkpoint |
@@ -101,7 +101,7 @@ Not cosmetic — each one is a thing that went wrong once:
 - **Free-port search** — shared clusters squat ports; binding blindly fails with `EADDRINUSE`
   after the model has already loaded.
 - **Readiness gate requires `SERVED_NAME`** — on a shared box the port may belong to someone
-  else's server, so a bare HTTP 200 is a false positive. `vllm-serve.info` records the port
+  else's server, so a bare HTTP 200 is a false positive. `mt-serve.info` records the port
   actually bound, because it may not be the one you asked for.
 
 ## Talk to it

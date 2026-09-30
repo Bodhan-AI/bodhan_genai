@@ -22,7 +22,7 @@ scripts/mt/eval.sh --langs hin_Deva --directions en-xx --max-samples 32
 scripts/mt/eval.sh
 ```
 
-`eval.sh` reads `vllm-serve.info` for the port the server actually bound to, so it follows a
+`eval.sh` reads `mt-serve.info` for the port the server actually bound to, so it follows a
 free-port fallback automatically.
 
 Outputs, under `<output-dir>/IN22-Gen/`:

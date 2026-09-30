@@ -11,10 +11,13 @@ cd "$(dirname "$0")/../.."
 
 OUTPUT_DIR="${OUTPUT_DIR:-in22-results}"
 URL="${URL:-http://localhost:8000/v1}"
-# serve.sh writes the port it actually bound to; prefer it over the default.
-if [[ -z "${URL_OVERRIDDEN:-}" && -f vllm-serve.info ]]; then
-    # shellcheck disable=SC1091
-    source vllm-serve.info
+# serve.sh writes the port it actually bound to; prefer it over the default. Same
+# INFO_FILE default as serve.sh -- the two must agree, or a server that moved off a busy
+# port is silently missed and the eval runs against whatever answers on :8000.
+INFO_FILE="${INFO_FILE:-mt-serve.info}"
+if [[ -z "${URL_OVERRIDDEN:-}" && -f "${INFO_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${INFO_FILE}"
     URL="http://127.0.0.1:${PORT}/v1"
 fi
 

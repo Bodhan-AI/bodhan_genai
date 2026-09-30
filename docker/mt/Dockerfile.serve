@@ -113,7 +113,7 @@ EXPOSE 8000
 # vLLM and exits 0 the moment the server answers, which would stop the container
 # exactly when it became useful. In foreground mode serve.sh `exec`s vLLM, so the
 # engine is PID 1 and `docker stop` signals it directly rather than a wrapper that
-# would orphan it. The trade: that path writes no vllm-serve.info and prints no
+# would orphan it. The trade: that path writes no mt-serve.info and prints no
 # "Ready" banner, so readiness is observed from outside — GET /v1/models, which
 # must name SERVED_NAME to count.
 ENTRYPOINT ["bash", "scripts/mt/serve.sh", "--foreground"]
