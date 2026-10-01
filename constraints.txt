@@ -253,7 +253,7 @@ tiktoken==0.13.0
 tilelang==0.1.9
 tokenizers==0.22.2
 tokenspeed-mla==0.1.8
-tokenspeed-triton==3.8.10.post20260721
+tokenspeed-triton==3.8.10.post20260920
 tqdm==4.70.0
 transformers==5.13.1
 trl==1.6.0
