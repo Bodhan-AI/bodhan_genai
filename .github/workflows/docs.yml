@@ -48,7 +48,7 @@ jobs:
 
       # Always attached, so the rendered site is reviewable from any run — this is
       # the only way to read it while Pages is unavailable.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: site
           path: site
