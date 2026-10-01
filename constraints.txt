@@ -125,7 +125,7 @@ keyring==25.7.0
 lark==1.2.2
 lazy-loader==0.5
 librosa==0.11.0
-llguidance==1.7.6
+llguidance==1.8.0
 llvmlite==0.47.0
 lm-format-enforcer==0.11.3
 loguru==0.7.3
