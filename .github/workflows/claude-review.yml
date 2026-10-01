@@ -23,7 +23,7 @@ jobs:
       id-token: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so the action can diff against the base branch.
           fetch-depth: 0
