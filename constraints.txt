@@ -102,7 +102,7 @@ httpcore==1.0.9
 httpcore2==2.10.0
 httptools==0.8.0
 httpx==0.28.1
-httpx2==2.10.0
+httpx2==2.13.1
 huggingface-hub==1.27.0
 humming-kernels==0.1.10
 id==1.6.1
