@@ -51,6 +51,6 @@ pytest==9.1.1
 # ASR: torchaudio backs audio input and feature extraction; websockets and uvicorn
 # back the streaming and serving tests. Absent, seven tests/asr modules fail at
 # COLLECTION, which reads as a broken branch rather than a missing dependency.
-torchaudio==2.11.0
+torchaudio==2.11.0+cpu
 websockets==17.0.1
 uvicorn==0.52.1
