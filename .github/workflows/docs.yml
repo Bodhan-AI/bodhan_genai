@@ -54,7 +54,7 @@ jobs:
           path: site
           retention-days: 14
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: github.ref == 'refs/heads/master' && vars.ENABLE_PAGES == 'true'
         with:
           path: site
