@@ -248,7 +248,7 @@ starlette==1.6.0
 supervisor==4.3.0
 sympy==1.14.0
 tabulate==0.10.0
-threadpoolctl==3.6.0
+threadpoolctl==3.7.0
 tiktoken==0.13.0
 tilelang==0.1.9
 tokenizers==0.22.2
