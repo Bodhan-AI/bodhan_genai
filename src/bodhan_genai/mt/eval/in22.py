@@ -18,7 +18,7 @@ Start narrow while iterating::
 Requires a server: ``scripts/mt/serve.sh``.
 
 Note the eval language list uses ``mni_Mtei`` and ``snd_Deva`` — one script per
-language, 22 in total. The served set carries 25 language-script combinations; the
+language, 22 in total. The served set carries 26 language-script combinations; the
 extra three are the alternate scripts, which IN22 does not cover.
 """
 

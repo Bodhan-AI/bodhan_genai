@@ -162,7 +162,7 @@ matter — see [serving.md](serving.md) for why a merged checkpoint otherwise fa
 Then:
 
 ```bash
-CHECKPOINT=merged-ckpt-4400 scripts/mt/serve.sh
+scripts/mt/serve.sh --model merged-ckpt-4400
 python -m bodhan_genai.mt.serving.client --tgt-lang Hindi --text "Hello world"
 ```
 

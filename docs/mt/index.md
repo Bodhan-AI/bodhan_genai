@@ -1,9 +1,25 @@
 # MT
 
-**IndicTranslate** — translation between English and 22 Eighth-Schedule Indian languages (25
+**IndicTranslate** — translation between English and 22 Eighth-Schedule Indian languages (26
 language-script combinations, 44 directions). A decoder-only multimodal LLM
 (`Gemma4ForConditionalGeneration`, base `google/gemma-4-E4B-it`, 7.94 B params bf16),
 instruction-tuned for translation.
+
+Published at
+[`bodhan-ai/indic-translate`](https://huggingface.co/bodhan-ai/indic-translate) — see the model
+card there for capability details, supported languages and quality numbers.
+
+## What it does
+
+| capability | how you ask for it |
+|---|---|
+| **Sentence translation**, 44 directions | `translate(text, tgt_lang="hin_Deva")` |
+| **Document translation** — one request, structure preserved, up to 32,768 tokens | `translate_document(text, tgt_lang="hin_Deva", max_new_tokens=8192)` |
+| **Romanized translation** — the target language in Latin letters | `translate(text, tgt_lang="hin_Deva", script="roman")` |
+| **Transliteration** — script changes, language does not | `transliterate(text, lang="hin_Deva", script="roman")` |
+| **Code-mixed translation** — English mixed into the target | `translate(text, tgt_lang="hin_Deva", script="code_mixed")` |
+
+All three are reachable on every backend, [the hosted API](api.md) included.
 
 There are **no language tokens and no `forced_bos_token_id`**: the target language is an English
 name interpolated into an instruction, and the source language is never named — the model infers
@@ -32,6 +48,9 @@ with IndicMTEngine("bodhan-ai/indic-translate") as engine:
 
 Note what is never passed: a source language. The same call handles both directions.
 
+With a `BODHAN_API_KEY` exported, the [hosted API](api.md) is the default and you need no
+checkpoint and no GPU at all — `IndicMTEngine()` with no arguments.
+
 !!! warning "The multi-script qualifier is functional, not decoration"
 
     For Kashmiri, Manipuri and Sindhi the parenthetical selects the output script. Prompting bare
@@ -42,6 +61,7 @@ Note what is never passed: a source language. The same call handles both directi
 
 - [End to end](end-to-end.md) — **start here**: every workflow on one page
 - [Prompt contract](prompt_contract.md) — the request format, and what breaks it
+- [Hosted API](api.md) — translating with a token instead of a GPU
 - [Data pipeline](data_pipeline.md) — bitext to instruction chat rows
 - [Training](training.md) — LoRA finetuning (provisional recipe)
 - [Serving](serving.md) — stock `vllm serve` plus the typed client

@@ -109,6 +109,7 @@ nav:
       - Data pipeline: mt/data_pipeline.md
       - Training: mt/training.md
       - Serving: mt/serving.md
+      - Hosted API: mt/api.md
       - Eval: mt/eval.md
       - Configs: mt/configs.md
   - OCR:

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`LANGUAGE_NAMES` is 26, was 25** — `kas_Deva` (Kashmiri in Devanagari) was added. The served
+  API contract carries the code and names it as the one code the table omitted.
+- **The default backend is now resolved, not hardcoded.** With `BODHAN_API_KEY` or
+  `BODHAN_API_TOKEN` set, the hosted API is used; otherwise vLLM, exactly as before. An explicit
+  `backend=` always wins, so callers that name a backend are unaffected.
+
+### Added
+
+- **The hosted Bodhan API as a third MT backend** (`bodhan_genai.mt.engine.api`), the default when
+  `BODHAN_API_KEY` or `BODHAN_API_TOKEN` is set. Translate with a token instead of a GPU: no
+  checkpoint, no extras, stdlib `urllib.request` only. It targets the **OpenAI-compatible**
+  `/v1/chat/completions` surface the service advertises via `/v1/models`, so it is a
+  conversation-level backend behind the same `PromptedBackend` adapter as vLLM and HF — which
+  gives the hosted path **full capability parity**: Roman output, transliteration, code-mix,
+  script-qualified names, greedy decoding, real token counts, and truncation from `finish_reason`.
+  Retries `429`/`5xx` with jittered backoff, and `401`/`403` only once the key has already
+  succeeded — a valid key can return auth errors under high parallelism, and a client that retries
+  only on `429` records those as hard failures. Every other `4xx` is terminal. See
+  `docs/mt/api.md`.
+- `bodhan_genai.mt.inference.api_translate`, and an `api` subcommand on
+  `bodhan_genai.mt.inference.cli`, for translating over the hosted service from the shell.
+- `IndicMTEngine.health()` — reachable-and-serving-the-right-model, not just a 200.
+- **Romanized translation, transliteration and code-mixed output** in the prompt contract, via
+  keyword-only `script=` and `task=` whose defaults reproduce the existing calls byte-for-byte.
+  `ROMAN_NAMES` and `CODEMIX_NAMES` are explicit tables rather than a suffix rule, because a
+  language carried in two native scripts has exactly one Roman name. `SHORT_CODES` accepts the
+  API's `hi`/`ta` spellings through the same resolver, so the served and local paths cannot drift.
+- **`MTResult.truncated`** — a truncated translation comes back fluent and simply stops, and
+  nothing else signals it. Deliberately not folded into `ok`: a truncated segment is a real partial
+  result that must still be scored, or evals silently lose rows. `complete` is the strict view. All
+  three backends report it.
+- **`bodhan_genai.mt.eval.roman`** — scores `en2roman`, `roman2en`, `xx2roman` and `roman2xx`.
+  Transliteration is scored with CER and WER (jiwer) reported as a pair alongside chrF++, never CER
+  alone. `--dataset` also accepts a local directory, so the eval runs offline. No code-mix scorer:
+  none exists upstream either, so any number would be unmeasured.
+- `MTClient` gains `script=`/`task=` and reports truncation from `finish_reason`.
+
 ## [0.2.0] - 2026-09-08
 
 ### Changed — the public namespace (BREAKING)

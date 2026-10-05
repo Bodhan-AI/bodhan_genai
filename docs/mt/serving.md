@@ -1,5 +1,11 @@
 # Serving IndicTranslate
 
+
+!!! tip "You may not need a server"
+
+    If you have a Bodhan API key, [the hosted API](api.md) is the default backend and needs no
+    server, no GPU and no checkpoint. This page is for running the model yourself.
+
 ## Architecture: there is no custom server
 
 ```mermaid
@@ -21,7 +27,7 @@ What *is* worth owning in-process is the [prompt contract](prompt_contract.md), 
 
 | module | role |
 |---|---|
-| `scripts/mt/serve.sh` | launches `vllm serve` with the validated flags; free-port search; readiness gate; writes `vllm-serve.info` |
+| `scripts/mt/serve.sh` | launches `vllm serve` with the validated flags; free-port search; readiness gate; writes `mt-serve.info` |
 | `bodhan_genai.mt.serving.client` | `MTClient` — typed client that builds correct requests; also a CLI |
 | `bodhan_genai.mt.tools.vllm_ready` | adds the KV-shared `k_norm` sidecar a self-trained checkpoint needs |
 | `bodhan_genai.mt.training.merge` | adapter → standalone servable checkpoint |
@@ -30,7 +36,7 @@ What *is* worth owning in-process is the [prompt contract](prompt_contract.md), 
 
 ```bash
 scripts/mt/serve.sh                                   # published checkpoint, GPU 0, port 8000
-CHECKPOINT=/path/to/merged-ckpt scripts/mt/serve.sh   # your own finetune
+scripts/mt/serve.sh --model /path/to/merged-ckpt      # your own finetune
 GPU=3 PORT=8100 scripts/mt/serve.sh
 MAX_MODEL_LEN=32768 scripts/mt/serve.sh               # document workloads
 scripts/mt/serve.sh --foreground                      # don't background
@@ -42,7 +48,7 @@ Extra flags pass through to `vllm serve`.
 
 | var | default | notes |
 |---|---|---|
-| `CHECKPOINT` | `bodhan-ai/indic-translate` | local path or hub id |
+| `CHECKPOINT` | — | **deployment images only** (`BODHAN_GENAI_DEPLOYMENT=1`, set by the Dockerfile). Anywhere else it is ignored, with a warning. To serve a local checkpoint, pass `--model /path/or/hub-id` |
 | `SERVED_NAME` | `indic_translate` | the name clients must ask for |
 | `GPU` | `0` | sets `CUDA_VISIBLE_DEVICES` |
 | `PORT` | `8000` | auto-searches +200 if taken |
@@ -95,7 +101,7 @@ Not cosmetic — each one is a thing that went wrong once:
 - **Free-port search** — shared clusters squat ports; binding blindly fails with `EADDRINUSE`
   after the model has already loaded.
 - **Readiness gate requires `SERVED_NAME`** — on a shared box the port may belong to someone
-  else's server, so a bare HTTP 200 is a false positive. `vllm-serve.info` records the port
+  else's server, so a bare HTTP 200 is a false positive. `mt-serve.info` records the port
   actually bound, because it may not be the one you asked for.
 
 ## Talk to it

@@ -48,7 +48,7 @@ def test_package_import_and_prompt_contract_leave_heavy_deps_out():
         "import bodhan_genai.mt\n"
         "from bodhan_genai.mt import build_conversation, resolve_language, LANGUAGE_NAMES\n"
         "assert resolve_language('hin_Deva') == 'Hindi'\n"
-        "assert len(LANGUAGE_NAMES) == 25\n"
+        "assert len(LANGUAGE_NAMES) == 26\n"
         "assert build_conversation('hi', 'Hindi')[0]['role'] == 'user'\n" + _ASSERT_CLEAN
     )
 

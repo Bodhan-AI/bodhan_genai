@@ -31,7 +31,7 @@ from bodhan_genai.mt.engine.types import MTResult, MTSamplingConfig
 from bodhan_genai.mt.templates.prompt import (
     STOP_STRINGS,
     build_conversation,
-    resolve_language,
+    resolve_target_name,
 )
 
 logger = logging.getLogger("mt.serving.client")
@@ -77,16 +77,23 @@ class MTClient:
         *,
         tgt_lang: str,
         src_lang: str | None = None,
+        script: str = "native",
+        task: str = "translate",
         **overrides,
     ) -> MTResult:
-        """Translate one segment. Transport errors land in ``MTResult.error``."""
-        tgt_name = resolve_language(tgt_lang)
+        """Translate one segment. Transport errors land in ``MTResult.error``.
+
+        ``script`` selects the output rendering (``native``, ``roman``,
+        ``code_mixed``) and ``task`` picks translation or transliteration. The
+        served model carries all of them, so this client exposes all of them.
+        """
+        tgt_name = resolve_target_name(tgt_lang, script=script, task=task)
         sc = self.sampling.merged(**overrides)
         result = MTResult(source=text, src_lang=src_lang, tgt_lang=tgt_name)
 
         body: dict[str, Any] = {
             "model": self.model,
-            "messages": build_conversation(text, tgt_lang),
+            "messages": build_conversation(text, tgt_lang, script=script, task=task),
             "temperature": sc.temperature,
             "max_tokens": sc.max_new_tokens,
             # <turn|> is already an EOS; sending it as a stop is harmless and
@@ -107,6 +114,9 @@ class MTClient:
         result.gen_time_s = time.perf_counter() - started
 
         result.text = (response.choices[0].message.content or "").strip()
+        # finish_reason "length" is the only signal the budget was hit; a
+        # truncated translation is otherwise fluent and simply stops.
+        result.truncated = getattr(response.choices[0], "finish_reason", None) == "length"
         usage = getattr(response, "usage", None)
         if usage is not None:
             result.prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
@@ -121,6 +131,8 @@ class MTClient:
         *,
         tgt_lang: str,
         src_lang: str | None = None,
+        script: str = "native",
+        task: str = "translate",
         num_workers: int = 32,
         **overrides,
     ) -> list[MTResult]:
@@ -130,12 +142,14 @@ class MTClient:
         queue fed. Results stay aligned with ``texts`` regardless of completion
         order, so a failed row never shifts the ones after it.
         """
-        resolve_language(tgt_lang)  # fail fast, once, before fanning out
+        resolve_target_name(tgt_lang, script=script, task=task)  # fail fast, before fan-out
         if not texts:
             return []
 
         def _one(text: str) -> MTResult:
-            return self.translate(text, tgt_lang=tgt_lang, src_lang=src_lang, **overrides)
+            return self.translate(
+                text, tgt_lang=tgt_lang, src_lang=src_lang, script=script, task=task, **overrides
+            )
 
         with ThreadPoolExecutor(max_workers=max(1, min(num_workers, len(texts)))) as pool:
             return list(pool.map(_one, texts))

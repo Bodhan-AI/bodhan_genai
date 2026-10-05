@@ -22,7 +22,7 @@ scripts/mt/eval.sh --langs hin_Deva --directions en-xx --max-samples 32
 scripts/mt/eval.sh
 ```
 
-`eval.sh` reads `vllm-serve.info` for the port the server actually bound to, so it follows a
+`eval.sh` reads `mt-serve.info` for the port the server actually bound to, so it follows a
 free-port fallback automatically.
 
 Outputs, under `<output-dir>/IN22-Gen/`:
@@ -49,6 +49,8 @@ stale.
 No normalization, transliteration or detokenization anywhere — scoring runs on the raw strings.
 Empty predictions are kept, not filtered: a model that fails a segment should be penalised for it,
 and dropping the row quietly inflates the score.
+
+(The romanized/transliteration eval below is the one exception, and it says why.)
 
 ## Pooled vs macro aggregates
 
@@ -111,7 +113,7 @@ low number there is the expected level for that language, not a bug. Compare a d
 ## Language set
 
 Eval covers 22 languages + English = 44 directions, using **one script per language**
-(`mni_Mtei`, `snd_Deva`). The served set has 25 language-script combinations; the extra three are
+(`mni_Mtei`, `snd_Deva`). The served set has 26 language-script combinations; the extra three are
 alternate scripts the benchmark does not cover.
 
 ## Notes
@@ -121,3 +123,71 @@ alternate scripts the benchmark does not cover.
 - `--num-workers` (default 64) only controls how full the server's queue is kept; vLLM batches
   internally.
 - Greedy decoding throughout. Sampling makes scores unreproducible.
+
+---
+
+## Romanized translation and transliteration
+
+IN22-Gen carries no Roman references, so the harness above cannot see any of the Roman
+capability. `bodhan_genai.mt.eval.roman` scores it against a companion set whose rows carry
+`english` / `native` / `roman` side by side, so one row yields all four directions:
+
+```bash
+python -m bodhan_genai.mt.eval.roman -o roman-results \
+    --url http://localhost:8000/v1 --langs hin_Deva tam_Taml --max-samples 64
+```
+
+| direction | what it is | metrics |
+|---|---|---|
+| `en2roman` | translation into Latin-letter Indic | BLEU, chrF++ |
+| `roman2en` | translation out of it | BLEU, chrF++ |
+| `xx2roman` | **transliteration**, native → Roman | chrF++, CER, WER, exact |
+| `roman2xx` | **transliteration**, Roman → native | chrF++, CER, WER, exact |
+
+The two halves are scored differently on purpose. The first pair is *translation* — the content
+changes, so surface-overlap metrics are right. The second pair is *transliteration* — the content
+is fixed and only the script moves, so BLEU is close to meaningless and character-level error
+rates carry the signal.
+
+### Read CER and WER together, never CER alone
+
+Romanization has no canonical spelling. One vowel chosen differently costs almost nothing in CER
+and a whole word in WER, so a **high WER/CER ratio means errors are spread thinly** — a character
+or two wrong inside many otherwise-correct words — rather than that the output is bad. CER alone
+reads rosier than the output is; WER alone reads worse. That is why they are reported as a pair.
+
+`exact` stays low by construction for the same reason. It is a floor indicator, not a quality
+measure.
+
+**CER/WER come from jiwer**, a separate edit-distance implementation from sacreBLEU's, so the two
+agreeing is free verification rather than one code path checked twice.
+
+### Whitespace is collapsed before scoring
+
+This is the one place normalization is applied, and it is required rather than cosmetic: jiwer's
+default word transform splits on `" "` and leaves `\n` and `\t` inside tokens, so without the
+collapse every line break merges two words and inflates WER. Rows where either side normalises to
+empty are excluded rather than scored as a total miss.
+
+### Check the truncation warning
+
+The harness warns per cell when any row hits the token budget:
+
+```
+WARNING mt.eval.roman: kan_Knda:en2roman — 12/64 TRUNCATED; raise --max-new-tokens
+```
+
+**Do not report a score from a cell that warned.** Romanized output is more token-hungry than
+native-script output, and a truncated row is scored as a quality failure when it is a budget
+failure. Raise `--max-new-tokens` and re-run.
+
+### Running offline, or against a private set
+
+`--dataset` also accepts a local directory laid out one subdirectory per language, each holding
+the split's parquet files — the same shape the Hub cache uses. That makes this eval runnable on an
+air-gapped node and against a private set without credentials.
+
+### No code-mix scorer
+
+The model produces code-mix and nothing here measures it, upstream included. Any code-mix quality
+number would be unmeasured, so none is reported.

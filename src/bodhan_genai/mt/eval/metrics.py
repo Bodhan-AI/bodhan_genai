@@ -14,6 +14,8 @@ runs on the raw strings, as it did for the reference numbers.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 
 
@@ -98,3 +100,75 @@ def is_degenerate(
     if len(prediction) < min_chars:
         return False
     return len(source) > 0 and (len(source) / len(prediction)) < ratio
+
+
+# --------------------------------------------------------------------------- #
+# Character / word error rate — transliteration
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class ErrorRate:
+    """CER/WER plus exact match for one transliteration direction.
+
+    Reported as a PAIR on purpose. CER gives partial credit inside a word and WER
+    does not, so together they bracket the truth; CER alone reads rosier than the
+    output is. Romanization has no canonical spelling, so one vowel chosen
+    differently costs almost nothing in CER and a whole word in WER — a high
+    WER/CER ratio means errors are spread thinly, not that the output is bad.
+
+    ``exact`` stays low by construction for the same reason; it is a floor
+    indicator, not a quality measure.
+    """
+
+    cer: float
+    wer: float
+    exact: float
+    n: int
+
+    def as_dict(self) -> dict[str, float | int]:
+        return {"cer": self.cer, "wer": self.wer, "exact": self.exact, "n": self.n}
+
+
+def _normalise(text: str) -> str:
+    """NFC, whitespace collapsed, stripped.
+
+    The whitespace collapse is required, not cosmetic: jiwer's default word
+    transform splits on " " and leaves \n and \t inside tokens, so without it
+    every line break merges two words and inflates WER.
+    """
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", text)).strip()
+
+
+def score_error_rate(predictions: list[str], references: list[str]) -> ErrorRate:
+    """Score a transliteration direction with jiwer.
+
+    jiwer is a separate edit-distance implementation from sacreBLEU's, so the two
+    agreeing is free verification rather than one code path checked twice.
+
+    Rows where either side normalises to empty are excluded rather than scored as
+    a total miss — jiwer raises on an empty reference, and scoring one as 100%
+    wrong would move the aggregate for a data problem.
+    """
+    if len(predictions) != len(references):
+        raise ValueError(f"{len(predictions)} predictions against {len(references)} references")
+    import jiwer
+
+    pairs = [
+        (p, r)
+        for p, r in (
+            (_normalise(p), _normalise(r)) for p, r in zip(predictions, references, strict=True)
+        )
+        if p and r
+    ]
+    if not pairs:
+        raise ValueError("no scorable rows: every prediction or reference was empty")
+    preds = [p for p, _ in pairs]
+    refs = [r for _, r in pairs]
+    exact = sum(p == r for p, r in pairs) / len(pairs)
+    return ErrorRate(
+        cer=jiwer.cer(refs, preds),
+        wer=jiwer.wer(refs, preds),
+        exact=exact,
+        n=len(pairs),
+    )

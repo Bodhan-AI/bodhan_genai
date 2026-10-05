@@ -3,7 +3,7 @@
 #
 #   scripts/mt/serve.sh                              # defaults, GPU 0, port 8000
 #   GPU=3 PORT=8100 scripts/mt/serve.sh
-#   CHECKPOINT=/path/to/merged-ckpt scripts/mt/serve.sh
+#   scripts/mt/serve.sh --model /path/to/merged-ckpt
 #   MAX_MODEL_LEN=32768 scripts/mt/serve.sh          # full-document workloads
 #   scripts/mt/serve.sh --foreground                 # don't background the server
 #
@@ -34,9 +34,17 @@ cd "$(dirname "$0")/../.."
 # they are how mounted weights under /models are addressed. Outside one, an inherited CHECKPOINT
 # silently serving different weights is a correctness bug that presents as a model regression,
 # so it is ignored and the published default is used. To point this at your own checkpoint
-# locally, pass the flag -- "$@" is forwarded last and argparse takes the later occurrence:
+# locally, pass the flag:
 #   ./scripts/mt/serve.sh --model /path/to/ckpt
+# It is parsed here, not forwarded: vLLM >= 0.26 rejects `--model` next to the positional
+# model argument ("unrecognized arguments"), so forwarding it cannot work.
 if [ "${BODHAN_GENAI_DEPLOYMENT:-}" != "1" ]; then
+    if [ -n "${CHECKPOINT:-}" ]; then
+        # Say so: the failure this prevents is silent, and so would be ignoring it -- the
+        # server comes up healthy under the same served name, on the wrong weights.
+        echo "WARNING: CHECKPOINT=${CHECKPOINT} is ignored outside a deployment image;" \
+             "serving the published default. To serve it: $0 --model ${CHECKPOINT}" >&2
+    fi
     unset CHECKPOINT
 fi
 MODEL="${CHECKPOINT:-bodhan-ai/indic-translate}"
@@ -59,6 +67,8 @@ EXTRA=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --foreground) FOREGROUND=1; shift ;;
+        --model) MODEL="${2:?--model requires a path or hub id}"; shift 2 ;;
+        --model=*) MODEL="${1#--model=}"; shift ;;
         *) EXTRA+=("$1"); shift ;;
     esac
 done

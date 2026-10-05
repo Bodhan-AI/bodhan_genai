@@ -15,14 +15,25 @@ import os
 import time
 from typing import Any, Protocol, runtime_checkable
 
-from bodhan_genai.mt.engine.types import MTResult, MTSamplingConfig
+from bodhan_genai.mt.engine.backends import find_api_key, resolve_backend_name
+from bodhan_genai.mt.engine.types import (
+    BackendOutput,
+    MTRequest,
+    MTResult,
+    MTSamplingConfig,
+)
 from bodhan_genai.mt.templates.prompt import (
     STOP_STRINGS,
-    build_conversation,
-    resolve_language,
+    render_conversations,
+    resolve_target_name,
 )
 
 logger = logging.getLogger("mt.engine.offline")
+
+#: The published checkpoint, so IndicMTEngine() matches IndicTTSEngine(), IndicOCR() and
+#: IndicASREngine() in taking no required argument. Public on the Hub. A caller on the
+#: hosted API needs no checkpoint at all; ``model`` is then ignored.
+DEFAULT_MODEL_REPO = "bodhan-ai/indic-translate"
 
 #: The context window the released checkpoint is validated at. The architecture
 #: allows up to 131072, but only 32768 has been measured end to end.
@@ -36,17 +47,69 @@ DEFAULT_MAX_MODEL_LEN = 32_768
 
 @runtime_checkable
 class TranslationBackend(Protocol):
-    """Conversation-level generation backend: messages in, completion text out."""
+    """Request-level generation backend: requests in, outputs out.
 
-    def generate(
-        self, conversations: list[list[dict[str, str]]], sc: MTSamplingConfig
-    ) -> list[str]:
-        """Generate one completion per conversation, aligned with the input."""
+    Request-level and not conversation-level because the hosted API never
+    receives a prompt — it builds one server-side — so a rendered conversation
+    would have to be un-rendered to reach the wire.
+
+    Local backends are conversation-level internally and reach this protocol
+    through :class:`PromptedBackend`, which is the single place an
+    :class:`MTRequest` becomes a prompt.
+    """
+
+    def generate(self, requests: list[MTRequest], sc: MTSamplingConfig) -> list[BackendOutput]:
+        """Generate one output per request, aligned with the input."""
         ...
 
     def close(self) -> None:
         """Release model / GPU resources. Idempotent best-effort."""
         ...
+
+
+@runtime_checkable
+class ConversationBackend(Protocol):
+    """Internal protocol for backends that consume rendered prompts."""
+
+    def generate_conversations(
+        self, conversations: list[list[dict[str, str]]], sc: MTSamplingConfig
+    ) -> list[BackendOutput]:
+        """Generate one output per conversation, aligned with the input."""
+        ...
+
+    def close(self) -> None:
+        """Release model / GPU resources. Idempotent best-effort."""
+        ...
+
+
+class PromptedBackend:
+    """Adapts a :class:`ConversationBackend` to the request-level protocol.
+
+    This exists so prompt construction has exactly ONE call site. Letting each
+    local backend render its own prompts would put two copies of the contract in
+    the package, and N copies of the contract drifting apart is the documented
+    failure mode this whole module is organised against.
+    """
+
+    def __init__(self, inner: ConversationBackend) -> None:
+        self._inner = inner
+
+    def generate(self, requests: list[MTRequest], sc: MTSamplingConfig) -> list[BackendOutput]:
+        return self._inner.generate_conversations(render_conversations(requests), sc)
+
+    def close(self) -> None:
+        self._inner.close()
+
+    # The adapter must not hide what the inner backend can do. Both of these are
+    # optional on the protocol, so they are forwarded only when present.
+    def validate(self, task: str, script: str) -> None:
+        inner = getattr(self._inner, "validate", None)
+        if inner is not None:
+            inner(task, script)
+
+    def health(self) -> bool:
+        inner = getattr(self._inner, "health", None)
+        return True if inner is None else bool(inner())
 
 
 # --------------------------------------------------------------------------- #
@@ -114,9 +177,9 @@ class _VllmBackend:
             logger.info("loading vLLM engine: %s", model)
             self._llm = LLM(**kwargs)
 
-    def generate(
+    def generate_conversations(
         self, conversations: list[list[dict[str, str]]], sc: MTSamplingConfig
-    ) -> list[str]:
+    ) -> list[BackendOutput]:
         from vllm import SamplingParams
 
         sampling = SamplingParams(
@@ -132,7 +195,17 @@ class _VllmBackend:
         # vLLM applies the chat template shipped in the checkpoint and schedules
         # the whole list as one continuous batch.
         outputs = self._llm.chat(conversations, sampling_params=sampling)
-        return [out.outputs[0].text.strip() for out in outputs]
+        return [
+            BackendOutput(
+                text=out.outputs[0].text.strip(),
+                # "length" is the only signal that the budget was hit; a truncated
+                # translation is otherwise fluent and simply stops.
+                truncated=out.outputs[0].finish_reason == "length",
+                prompt_tokens=len(out.prompt_token_ids or ()),
+                generated_tokens=len(out.outputs[0].token_ids or ()),
+            )
+            for out in outputs
+        ]
 
     def close(self) -> None:
         self._llm = None
@@ -200,9 +273,9 @@ class _HfBackend:
         self.device = next(self.model.parameters()).device
         logger.info("ready on %s", self.device)
 
-    def generate(
+    def generate_conversations(
         self, conversations: list[list[dict[str, str]]], sc: MTSamplingConfig
-    ) -> list[str]:
+    ) -> list[BackendOutput]:
         inputs = self.processor.apply_chat_template(
             conversations,
             add_generation_prompt=True,
@@ -234,7 +307,17 @@ class _HfBackend:
 
         completions = output_ids[:, prompt_len:]
         decoded = self.processor.batch_decode(completions, skip_special_tokens=True)
-        return [d.strip() for d in decoded]
+        # No finish_reason here: hitting the budget exactly is the signal.
+        truncated = completions.shape[-1] >= sc.max_new_tokens
+        return [
+            BackendOutput(
+                text=d.strip(),
+                truncated=truncated,
+                prompt_tokens=prompt_len,
+                generated_tokens=int(completions.shape[-1]),
+            )
+            for d in decoded
+        ]
 
     def close(self) -> None:
         self.model = None
@@ -244,11 +327,6 @@ class _HfBackend:
 # --------------------------------------------------------------------------- #
 # Engine
 # --------------------------------------------------------------------------- #
-
-
-#: The published checkpoint, so IndicMTEngine() matches IndicTTSEngine(), IndicOCR() and
-#: IndicASREngine() in taking no required argument. Public on the Hub.
-DEFAULT_MODEL_REPO = "bodhan-ai/indic-translate"
 
 
 class IndicMTEngine:
@@ -270,7 +348,9 @@ class IndicMTEngine:
         self,
         model: str = DEFAULT_MODEL_REPO,
         *,
-        backend: str | TranslationBackend = "vllm",
+        backend: str | TranslationBackend | None = None,
+        api_key: str | None = None,
+        api_base_url: str | None = None,
         adapter_dir: str | None = None,
         dtype: str = "bfloat16",
         sampling: MTSamplingConfig | None = None,
@@ -284,30 +364,55 @@ class IndicMTEngine:
         processor_loader: Any | None = None,
         llm_factory: Any | None = None,
     ) -> None:
-        if adapter_dir and backend == "vllm":
-            raise ValueError(
-                "adapter_dir is only supported with backend='hf' "
-                "(merge the adapter into the checkpoint for vLLM: "
-                "python -m bodhan_genai.mt.training.merge)."
-            )
-
         self.model_path = model
         self.sampling = sampling or MTSamplingConfig()
 
-        if isinstance(backend, str):
-            if backend == "vllm":
-                self._backend: TranslationBackend = _VllmBackend(
-                    model,
-                    dtype=dtype,
-                    tensor_parallel_size=tensor_parallel_size,
-                    max_model_len=max_model_len,
-                    gpu_memory_utilization=gpu_memory_utilization,
-                    enforce_eager=enforce_eager,
-                    engine_kwargs=engine_kwargs,
-                    llm_factory=llm_factory,
+        if not isinstance(backend, str) and backend is not None:
+            self.backend_name = "custom"
+            self._backend: TranslationBackend = backend
+            return
+
+        # None means "decide": the hosted API when a token is present, else vLLM.
+        # An explicit name always wins, so nothing that names a backend changes.
+        name = resolve_backend_name(backend)
+        self.backend_name = name
+
+        if adapter_dir and name != "hf":
+            raise ValueError(
+                f"adapter_dir is only supported with backend='hf' (got {name!r}). "
+                "Merge the adapter into the checkpoint first: "
+                "python -m bodhan_genai.mt.training.merge."
+            )
+
+        if name == "api":
+            from bodhan_genai.mt.engine.api import DEFAULT_BASE_URL, ApiBackend
+
+            # Conversation-level, like the local backends: the service takes a
+            # rendered chat conversation, so it goes behind PromptedBackend and
+            # the prompt contract keeps exactly one call site. That is also what
+            # gives the hosted path full capability parity -- Roman, code-mix and
+            # transliteration all ride in the prompt.
+            self._backend = PromptedBackend(
+                ApiBackend(
+                    api_key or find_api_key() or "",
+                    base_url=api_base_url or DEFAULT_BASE_URL,
                 )
-            elif backend == "hf":
-                self._backend = _HfBackend(
+            )
+        elif name == "vllm":
+            self._backend = _VllmBackend(
+                model,
+                dtype=dtype,
+                tensor_parallel_size=tensor_parallel_size,
+                max_model_len=max_model_len,
+                gpu_memory_utilization=gpu_memory_utilization,
+                enforce_eager=enforce_eager,
+                engine_kwargs=engine_kwargs,
+                llm_factory=llm_factory,
+            )
+            self._backend = PromptedBackend(self._backend)
+        else:
+            self._backend = PromptedBackend(
+                _HfBackend(
                     model,
                     adapter_dir=adapter_dir,
                     dtype=dtype,
@@ -315,12 +420,7 @@ class IndicMTEngine:
                     attn_implementation=attn_implementation,
                     processor_loader=processor_loader,
                 )
-            else:
-                raise ValueError(
-                    f"Unknown backend {backend!r} (expected 'vllm', 'hf' or an instance)"
-                )
-        else:
-            self._backend = backend
+            )
 
     # -- public API -------------------------------------------------------- #
 
@@ -330,11 +430,14 @@ class IndicMTEngine:
         *,
         tgt_lang: str,
         src_lang: str | None = None,
+        script: str = "native",
         **overrides,
     ) -> MTResult:
         """Translate one segment. Never raises for generation failure — see
         ``MTResult.error``."""
-        return self.translate_batch([text], tgt_lang=tgt_lang, src_lang=src_lang, **overrides)[0]
+        return self.translate_batch(
+            [text], tgt_lang=tgt_lang, src_lang=src_lang, script=script, **overrides
+        )[0]
 
     def translate_batch(
         self,
@@ -342,25 +445,38 @@ class IndicMTEngine:
         *,
         tgt_lang: str,
         src_lang: str | None = None,
+        script: str = "native",
+        task: str = "translate",
         **overrides,
     ) -> list[MTResult]:
         """Translate a list of segments in one batched call.
 
-        The language is resolved before anything is generated, so a typo fails
-        immediately rather than after a 16 GB model load and a full batch.
+        The language, script and task are resolved before anything is generated,
+        so a typo fails immediately rather than after a 16 GB model load and a
+        full batch. ``script`` selects the output rendering (``native``,
+        ``roman``, ``code_mixed``).
         """
-        tgt_name = resolve_language(tgt_lang)
+        tgt_name = resolve_target_name(tgt_lang, script=script, task=task)
+        # Transport-level fail-fast, for a backend that cannot carry some
+        # (task, script) pair. Saying so here beats a 4xx after the batch is
+        # already in flight. No current backend restricts anything.
+        validate = getattr(self._backend, "validate", None)
+        if validate is not None:
+            validate(task, script)
         sc = self.sampling.merged(**overrides)
 
         results = [MTResult(source=t, src_lang=src_lang, tgt_lang=tgt_name) for t in texts]
         if not texts:
             return results
 
-        conversations = [build_conversation(t, tgt_lang) for t in texts]
+        requests = [
+            MTRequest(text=t, tgt_lang=tgt_lang, script=script, task=task, src_lang=src_lang)
+            for t in texts
+        ]
 
         started = time.perf_counter()
         try:
-            completions = self._backend.generate(conversations, sc)
+            outputs = self._backend.generate(requests, sc)
         except Exception as exc:
             logger.exception("generation failed for a batch of %d", len(texts))
             for r in results:
@@ -368,17 +484,40 @@ class IndicMTEngine:
             return results
         elapsed = time.perf_counter() - started
 
-        if len(completions) != len(texts):
+        if len(outputs) != len(texts):
             raise RuntimeError(
-                f"backend returned {len(completions)} completions for {len(texts)} "
+                f"backend returned {len(outputs)} completions for {len(texts)} "
                 f"prompts; results would be misaligned"
             )
 
         per_request = elapsed / len(texts)
-        for r, completion in zip(results, completions, strict=True):
-            r.text = completion
-            r.gen_time_s = per_request
+        for r, out in zip(results, outputs, strict=True):
+            r.text = out.text
+            r.truncated = out.truncated
+            r.prompt_tokens = out.prompt_tokens
+            r.generated_tokens = out.generated_tokens
+            # A per-request backend reports the truth; a batched one cannot
+            # attribute time to one row, so the batch elapsed is split evenly.
+            r.gen_time_s = per_request if out.gen_time_s is None else out.gen_time_s
         return results
+
+    def transliterate(
+        self, text: str, *, lang: str, script: str = "roman", **overrides
+    ) -> MTResult:
+        """Rewrite one text in another script, without translating it.
+
+        Same language in, same language out: ``script="roman"`` goes native to
+        Latin, ``script="native"`` comes back.
+        """
+        return self.transliterate_batch([text], lang=lang, script=script, **overrides)[0]
+
+    def transliterate_batch(
+        self, texts: list[str], *, lang: str, script: str = "roman", **overrides
+    ) -> list[MTResult]:
+        """Transliterate a list of segments in one batched call."""
+        return self.translate_batch(
+            texts, tgt_lang=lang, script=script, task="transliterate", **overrides
+        )
 
     def translate_document(
         self,
@@ -386,6 +525,7 @@ class IndicMTEngine:
         *,
         tgt_lang: str,
         src_lang: str | None = None,
+        script: str = "native",
         **overrides,
     ) -> MTResult:
         """Translate a whole document as ONE request, preserving its structure.
@@ -393,7 +533,21 @@ class IndicMTEngine:
         Raise ``max_new_tokens`` accordingly (~8192 for a full document) — the
         default of 512 is sized for sentences and will truncate.
         """
-        return self.translate(text, tgt_lang=tgt_lang, src_lang=src_lang, **overrides)
+        return self.translate(
+            text, tgt_lang=tgt_lang, src_lang=src_lang, script=script, **overrides
+        )
+
+    # -- health ------------------------------------------------------------ #
+
+    def health(self) -> bool:
+        """True when the backend is reachable and serving the expected model.
+
+        Only the hosted backend can meaningfully answer this; an in-process
+        backend is up by construction, so it reports ``True`` rather than
+        forcing callers to special-case it.
+        """
+        probe = getattr(self._backend, "health", None)
+        return True if probe is None else bool(probe())
 
     # -- lifecycle --------------------------------------------------------- #
 

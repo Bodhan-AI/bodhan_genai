@@ -32,6 +32,10 @@ which looks close enough to pass a casual review.
 
 ::: bodhan_genai.mt.eval.metrics
 
+::: bodhan_genai.mt.engine.backends
+
+::: bodhan_genai.mt.engine.api
+
 ## Data pipeline
 
 ::: bodhan_genai.mt.data.render

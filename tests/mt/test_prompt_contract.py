@@ -70,8 +70,14 @@ def test_every_code_renders_with_its_own_name(code):
 
 
 def test_language_set_size():
-    """22 Eighth-Schedule languages + English = 25 language-script combinations."""
-    assert len(LANGUAGE_NAMES) == 25
+    """22 Eighth-Schedule languages + English = 26 language-script combinations.
+
+    Was 25. ``kas_Deva`` was added deliberately: the served API contract carries it
+    in its language table and names it as the one code ``LANGUAGE_NAMES`` omitted.
+    Kashmiri is the trap here -- bare ``Kashmiri`` is measurably worse than the
+    qualified name, so both scripts have to be reachable by an explicit code.
+    """
+    assert len(LANGUAGE_NAMES) == 26
 
 
 def test_braces_in_source_text_survive():
