@@ -46,6 +46,7 @@ def test_importing_every_module_pulls_in_nothing_heavy():
         "assert map_label('Sub-section-title') == 'SectionHeader'\n"
         "assert DedupConfig().mode == 'both' and CropConfig().min_px == 256 ** 2\n"
         "assert RecognizerConfig().table_format is TableFormat.HTML\n"
+        "assert RecognizerConfig().max_num_seqs == 64 and RecognizerConfig().enforce_eager is False\n"
         "assert all(isinstance(c, type) for c in (IndicOCR, IndicDocLayout, IndicBlockOCR))\n"
         + _ASSERT_CLEAN
     )
