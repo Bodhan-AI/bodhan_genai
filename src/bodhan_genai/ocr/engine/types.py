@@ -142,7 +142,11 @@ class RecognizerConfig:
     # One giant batch over tens of thousands of multi-modal requests wedges the vLLM V1
     # scheduler at 100% util with no progress; ~2k chunks run clean.
     batch_size: int = 2048
-    enforce_eager: bool = True  # skips ~4 min of torch.compile on a 0.8B model
+    # Hybrid GDN/Mamba (Qwen3.5) allocates state cache per sequence. Default 1024 explodes cache
+    # memory and hangs CUDA graph compilation; 64 matches typical page crop batches and compiles in seconds.
+    max_num_seqs: int = 64
+    # enforce_eager=False enables CUDA Graph capture (~3.7x-3.9x throughput speedup over eager dispatch)
+    enforce_eager: bool = False
     table_format: TableFormat = TableFormat.HTML
 
     def merged(self, **overrides) -> RecognizerConfig:

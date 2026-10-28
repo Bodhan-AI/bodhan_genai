@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **OCR Stage-2 inference throughput increased ~5x (~100 tok/s)** by enabling CUDA graph capture (`enforce_eager=False`) and setting `max_num_seqs=64` in `RecognizerConfig` to bound Mamba recurrent state cache during compilation.
+
 ## [0.2.0] - 2026-09-08
 
 ### Changed — the public namespace (BREAKING)

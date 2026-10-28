@@ -83,13 +83,27 @@ class VllmRecognizer:
             model=self.ckpt,
             trust_remote_code=True,
             max_model_len=self.config.max_model_len,
+            max_num_seqs=self.config.max_num_seqs,
             gpu_memory_utilization=self.config.gpu_memory_utilization,
             dtype=self.config.dtype,
             limit_mm_per_prompt={"image": 1},
             enforce_eager=self.config.enforce_eager,
         )
+
+        stop_token_ids: list[int] = []
+        if hasattr(self.processor, "tokenizer"):
+            im_end_id = self.processor.tokenizer.convert_tokens_to_ids("<|im_end|>")
+            if isinstance(im_end_id, int) and im_end_id > 0:
+                stop_token_ids.append(im_end_id)
+            if self.processor.tokenizer.eos_token_id is not None:
+                stop_token_ids.append(self.processor.tokenizer.eos_token_id)
+        if 262146 not in stop_token_ids:
+            stop_token_ids.append(262146)
+
         self.sampling = SamplingParams(
-            temperature=self.config.temperature, max_tokens=self.config.max_tokens
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+            stop_token_ids=sorted(set(stop_token_ids)),
         )
 
     def _chat(self, prompt: str) -> str:
@@ -106,11 +120,13 @@ class VllmRecognizer:
         ]
 
         texts: list[str] = []
+        # SentencePiece leading metaspace (Unicode U+2581: " ")
+        metaspace = chr(0x2581)
         # Bounded sub-batches: one giant generate() over tens of thousands of multi-modal
         # requests wedges the vLLM V1 scheduler at 100% util with no progress.
         for i in range(0, len(payload), self.config.batch_size):
             outputs = self.llm.generate(payload[i : i + self.config.batch_size], self.sampling)
-            texts.extend(out.outputs[0].text for out in outputs)
+            texts.extend(out.outputs[0].text.replace(metaspace, " ").strip() for out in outputs)
         return texts
 
     def close(self) -> None:

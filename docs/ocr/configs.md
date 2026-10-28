@@ -25,7 +25,8 @@ Override them explicitly through the dataclasses rather than through the environ
 | | `temperature` | `0.0` | greedy — the only reproducible setting |
 | | `gpu_memory_utilization` | `0.80` | leaves headroom for the layout model |
 | | `batch_size` | `2048` | requests per `generate()` call |
-| | `enforce_eager` | `True` | skips ~4 min of torch.compile |
+| | `max_num_seqs` | `64` | bounds Mamba recurrent state cache for fast graph capture |
+| | `enforce_eager` | `False` | enables CUDA graphs (~3.7x–5x speedup over eager dispatch) |
 | | `table_format` | `HTML` | `HTML` \| `MARKDOWN` |
 
 ## Two defaults worth leaving alone
